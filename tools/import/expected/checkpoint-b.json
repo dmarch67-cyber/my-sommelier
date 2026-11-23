@@ -1,0 +1,8 @@
+{
+  "_source": "Data Steward audit, Checkpoint B (2026-11-23). Counts only; no wine data.",
+  "lines": { "NCP": 777, "O": 51, "Paris": 58 },
+  "physical": { "NCP": 1823, "O": 120, "Paris": 366 },
+  "inCellar": { "NCP": 1811, "O": 120, "Paris": 366 },
+  "onOrder": { "NCP": 12, "O": 0, "Paris": 0 },
+  "magnums": { "NCP": 56, "O": 0, "Paris": 50 }
+}

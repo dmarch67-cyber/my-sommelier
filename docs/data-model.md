@@ -65,7 +65,7 @@ A count that would go below zero is rejected, so you can't drink a bottle you do
 
 ## Spreadsheet mapping
 
-This follows the field mapping in the Data Steward's audit of `My_Wine_Inventory.xlsx`. The importer is a separate step (`tools/import/`).
+This follows the field mapping in the Data Steward's audit of `My_Wine_Inventory.xlsx`. The importer is `tools/import/` (see its README): a dry run that writes a reconciliation report, then a one-transaction import that verifies its own counts.
 
 | Sheet field                           | Goes to                                                                                                                                                       | Notes                                                                                        |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

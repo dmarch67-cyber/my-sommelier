@@ -1,0 +1,22 @@
+{
+  "name": "@my-sommelier/import",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One-time importer for the cellar spreadsheet (dry run by default).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "sommelier-import": "src/cli.ts"
+  },
+  "scripts": {
+    "import": "node src/cli.ts",
+    "test": "node --test test/*.test.ts",
+    "test:db": "bash ../../scripts/with-test-db.sh node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0",
+    "pg": "8.13.1"
+  }
+}

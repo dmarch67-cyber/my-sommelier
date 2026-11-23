@@ -14,6 +14,18 @@ jobs:
       - name: Apply migrations and run tests on Postgres 16
         run: bash scripts/test-db.sh
 
+  importer:
+    name: Importer tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Unit tests and an import into a throwaway Postgres
+        run: npm run test:db -w tools/import
+
   format:
     name: Formatting
     runs-on: ubuntu-24.04
