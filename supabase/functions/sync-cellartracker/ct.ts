@@ -148,9 +148,8 @@ const STOP = new Set([
 export function words(name: string): string[] {
   return name
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[''`]/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(' ')
     .filter((w) => w && !STOP.has(w));
