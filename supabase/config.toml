@@ -1,0 +1,33 @@
+# Supabase CLI config for local development (`supabase start`).
+# The hosted project is not created yet; that needs Dan's go-ahead.
+project_id = "my-sommelier"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:8081"
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false

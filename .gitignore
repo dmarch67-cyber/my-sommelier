@@ -1,0 +1,29 @@
+# Dependencies and builds
+node_modules/
+dist/
+build/
+.expo/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
+
+# Never commit cellar data: spreadsheets, exports, import reports
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.numbers
+import-output/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

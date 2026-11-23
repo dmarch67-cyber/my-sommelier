@@ -1,0 +1,21 @@
+{
+  "name": "my-sommelier",
+  "private": true,
+  "description": "Personal wine cellar app: inventory, scores, tasting notes and drink-now advice.",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:test": "bash scripts/test-db.sh"
+  },
+  "devDependencies": {
+    "prettier": "3.3.3"
+  }
+}
