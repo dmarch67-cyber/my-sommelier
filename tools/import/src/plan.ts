@@ -338,10 +338,16 @@ export function buildPlan(sheets: RawSheet[]): ImportPlan {
           );
         }
         if (appellation && wine.appellation && appellation !== wine.appellation) {
+          const was = wine.appellation;
+          if (layout.regionWins) {
+            wine.appellation = appellation;
+            if (region) wine.region = region;
+          }
+          const kept = layout.regionWins ? appellation : was;
           change(
             r,
             'appellation_conflict',
-            `"${rawRegion}" here, but ${wine.appellation} on ${first?.sheet} row ${first?.row}; the wine keeps ${wine.appellation} and this line's region stays in import_ref`,
+            `"${rawRegion}" here, but ${was} on ${first?.sheet} row ${first?.row}; the wine uses ${kept}${layout.regionWins ? ` (the ${s} sheet's region wins)` : ''}`,
           );
         }
         if (!wine.appellation && appellation) wine.appellation = appellation;

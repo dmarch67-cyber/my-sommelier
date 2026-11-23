@@ -57,7 +57,7 @@ export async function buildFixture(): Promise<ArrayBuffer> {
       [null, 2024, 'TRUSS SKETCH 01', 'PASO ROBLES', 95, 75, 4, 4, 300, null, 4],
       [null, null, ' '],
       [null, null, 'OREGON'],
-      [null, 2023, 'BERGSTROM SIGRID CHARDONNAY', 'DUNDEE HILLS', 97, 106, 6, 6, 636],
+      [null, 2023, 'BERGSTROM SIGRID CHARDONNAY', 'RIBBON RIDGE', 97, 106, 6, 6, 636],
     ],
     2,
   );

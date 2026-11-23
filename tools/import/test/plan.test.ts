@@ -144,3 +144,9 @@ test('the report renders and the spot check spans every cellar', () => {
   assert.equal(picked.length, 13); // fewer lines than 20, so all of them
   assert.deepEqual(new Set(picked.map((h) => h.cellar)), new Set(['NCP', 'O', 'Paris']));
 });
+
+test("the Oregon sheet's region wins when the same wine disagrees", () => {
+  // Bergstrom Sigrid: LA says RIBBON RIDGE, the Oregon sheet says DUNDEE HILLS.
+  assert.equal(wineOf('NCP', 11).appellation, 'Dundee Hills');
+  assert.ok(kinds('O', 2).includes('appellation_conflict'));
+});
