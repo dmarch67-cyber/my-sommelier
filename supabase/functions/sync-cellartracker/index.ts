@@ -13,9 +13,18 @@
 // account (CT_OWNER_ACCOUNT, or Dan's account by default). Other users will
 // need their own CellarTracker connection before this is opened up.
 
+import Anthropic from 'npm:@anthropic-ai/sdk@1.13.0';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
 
-import { exportUrl, looksLikeExport, matchRows, parseCsv, type AppVintage } from './ct.ts';
+import { cleanPicks, leftovers, MODEL, PICK_SCHEMA, pickPrompt, SYSTEM } from './claudeMatch.ts';
+import {
+  exportUrl,
+  looksLikeExport,
+  matchRows,
+  parseCsv,
+  rowFacts,
+  type AppVintage,
+} from './ct.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -24,6 +33,9 @@ const CORS = {
 };
 // Dan's account. Not a secret: row-level security still decides who can write to it.
 const DEFAULT_OWNER_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
+// Bump when the matching changes, so the next app start re-runs the sync
+// instead of waiting a day.
+const MATCHER_VERSION = 2;
 const DAY_MS = 20 * 60 * 60 * 1000; // "once a day", with some slack
 
 function reply(status: number, body: unknown): Response {
@@ -76,14 +88,19 @@ Deno.serve(async (req) => {
   if (!force) {
     const { data: last } = await db
       .from('enrichment_runs')
-      .select('started_at')
+      .select('started_at,summary')
       .eq('account_id', accountId)
       .eq('source', 'cellartracker')
       .eq('ok', true)
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (last && Date.now() - new Date(last.started_at as string).getTime() < DAY_MS) {
+    const sameVersion = (last?.summary as { version?: number } | null)?.version === MATCHER_VERSION;
+    if (
+      last &&
+      sameVersion &&
+      Date.now() - new Date(last.started_at as string).getTime() < DAY_MS
+    ) {
       return reply(200, { skipped: 'recent' });
     }
   }
@@ -139,8 +156,8 @@ Deno.serve(async (req) => {
     if (!data || data.length < 1000) break;
   }
 
-  // 3. Match and save.
-  const { matches, unmatchedApp, unmatchedCt } = matchRows(rows, vintages);
+  // 3. Match by name and save straight away.
+  const { matches } = matchRows(rows, vintages);
   const { data: applied, error: writeError } = await db.rpc('apply_cellartracker', {
     p_matches: matches,
   });
@@ -148,7 +165,63 @@ Deno.serve(async (req) => {
     await log(false, { error: 'apply_failed', detail: writeError.message });
     return reply(500, { error: 'Could not save the CellarTracker facts.' });
   }
+
+  // Logged now, so a timeout in the second pass doesn't make every app start retry.
+  await log(true, { version: MATCHER_VERSION, pass: 1, matched: matches.length, applied });
+
+  // 4. Second pass: Claude matches the names the word comparison could not.
+  // A failure here keeps the first pass's matches.
+  let claudeMatched = 0;
+  let claudeApplied: unknown = null;
+  let claudeNote: string | null = null;
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const rest = leftovers(
+    rows,
+    vintages,
+    new Set(matches.map((m) => m.vintage_id)),
+    new Set(matches.map((m) => m.ct_id ?? '')),
+  );
+  if (apiKey && rest.apps.length > 0) {
+    try {
+      const response = await new Anthropic({ apiKey }).beta.messages.create({
+        model: MODEL,
+        max_tokens: 32000,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        output_config: { effort: 'low', format: { type: 'json_schema', schema: PICK_SCHEMA } },
+        system: SYSTEM,
+        messages: [{ role: 'user', content: pickPrompt(rest) }],
+      });
+      const textBlock = response.content.find((b) => b.type === 'text');
+      if (response.stop_reason === 'end_turn' && textBlock && textBlock.type === 'text') {
+        const picks = cleanPicks(JSON.parse(textBlock.text), rest);
+        const extra = [...picks].map(([vintageId, row]) => ({
+          vintage_id: vintageId,
+          ...rowFacts(row),
+        }));
+        if (extra.length > 0) {
+          const { data, error } = await db.rpc('apply_cellartracker', { p_matches: extra });
+          if (error) claudeNote = `save failed: ${error.message}`;
+          else {
+            claudeApplied = data;
+            claudeMatched = extra.length;
+            matches.push(...extra);
+          }
+        }
+      } else claudeNote = `stopped: ${response.stop_reason}`;
+    } catch (e) {
+      claudeNote = String(e).slice(0, 200);
+    }
+  }
+  const matchedIds = new Set(matches.map((m) => m.vintage_id));
+  const usedCt = new Set(matches.map((m) => m.ct_id));
+  const unmatchedApp = vintages.length - matchedIds.size;
+  const unmatchedCt = rows.filter((r) => !usedCt.has(r.iWine)).length;
   const summary = {
+    version: MATCHER_VERSION,
+    claude_matched: claudeMatched,
+    claude_note: claudeNote,
+    claude_applied: claudeApplied,
     ct_rows: rows.length,
     columns: Object.keys(rows[0]),
     app_vintages: vintages.length,
@@ -157,7 +230,7 @@ Deno.serve(async (req) => {
     unmatched_ct: unmatchedCt,
     // A few unmatched names from each side, to check the matching by eye.
     unmatched_app_sample: vintages
-      .filter((v) => !matches.some((m) => m.vintage_id === v.vintage_id))
+      .filter((v) => !matchedIds.has(v.vintage_id))
       .slice(0, 25)
       .map((v) => `${v.wine_name} ${v.year ?? 'NV'}`),
     ct_sample: rows.slice(0, 25).map((r) => `${r.Wine} ${r.Vintage}`),
