@@ -26,6 +26,19 @@ jobs:
       - name: Unit tests and an import into a throwaway Postgres
         run: npm run test:db -w tools/import
 
+  app:
+    name: App typecheck, tests and web build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck -w apps/mobile
+      - run: npm test -w apps/mobile
+      - run: npm run build:web -w apps/mobile
+
   format:
     name: Formatting
     runs-on: ubuntu-24.04
