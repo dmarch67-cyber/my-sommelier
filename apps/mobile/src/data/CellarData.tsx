@@ -8,6 +8,7 @@ import {
   type Cellar,
   type InventoryRow,
   type Score,
+  type TastingNote,
 } from '../logic/cellar';
 
 /**
@@ -26,8 +27,10 @@ type CellarData = {
   inventory: InventoryRow[];
   scores: Score[];
   accolades: Accolade[];
+  notes: TastingNote[];
   bestScores: Map<string, Score>;
-  reload: () => void;
+  /** Fetches everything again. Screens keep showing the old data meanwhile. */
+  reload: () => Promise<void>;
 };
 
 const Ctx = createContext<CellarData | null>(null);
@@ -50,6 +53,7 @@ async function fetchAll<T>(table: string, columns: string, orderBy: string): Pro
 
 const INVENTORY_COLUMNS = [
   'holding_id',
+  'account_id',
   'cellar_id',
   'cellar_name',
   'wine_id',
@@ -75,47 +79,60 @@ const INVENTORY_COLUMNS = [
 const SCORE_COLUMNS =
   'id,vintage_id,source,source_detail,raw_value,value_low,value_high,is_plus,is_barrel_sample,scale_max,reviewed_on,drink_from,drink_to,url';
 
+const NOTE_COLUMNS =
+  'id,account_id,vintage_id,inventory_event_id,tasted_on,rating,maturity,notes,food_pairing,occasion,would_buy_again,created_at';
+
+type Loaded = Omit<CellarData, 'bestScores' | 'reload'>;
+
+async function loadAll(): Promise<Loaded> {
+  const [cellars, inventory, scores, accolades, notes] = await Promise.all([
+    fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
+    fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
+    fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
+    fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
+    fetchAll<TastingNote>('tasting_notes', NOTE_COLUMNS, 'id'),
+  ]);
+  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes };
+}
+
 export function CellarDataProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<Omit<CellarData, 'bestScores' | 'reload'>>({
+  const [state, setState] = useState<Loaded>({
     status: 'loading',
     error: null,
     cellars: [],
     inventory: [],
     scores: [],
     accolades: [],
+    notes: [],
   });
-  const [attempt, setAttempt] = useState(0);
+
+  const reload = useCallback(async () => {
+    try {
+      setState(await loadAll());
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      // Keep showing what we had if a refresh fails; only the first load shows the error screen.
+      setState((s) => (s.status === 'ready' ? s : { ...s, status: 'error', error: message }));
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    setState((s) => ({ ...s, status: 'loading', error: null }));
-    Promise.all([
-      fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
-      fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
-      fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
-      fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
-    ])
-      .then(([cellars, inventory, scores, accolades]) => {
-        if (cancelled) return;
-        setState({ status: 'ready', error: null, cellars, inventory, scores, accolades });
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setState((s) => ({
-          ...s,
-          status: 'error',
-          error: e instanceof Error ? e.message : String(e),
-        }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt]);
+    reload();
+  }, [reload]);
 
   const bestScores = useMemo(() => bestScoreByVintage(state.scores), [state.scores]);
-  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const retry = useCallback(async () => {
+    setState((s) => ({ ...s, status: 'loading', error: null }));
+    await reload();
+  }, [reload]);
 
-  return <Ctx.Provider value={{ ...state, bestScores, reload }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider
+      value={{ ...state, bestScores, reload: state.status === 'error' ? retry : reload }}
+    >
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useCellarData(): CellarData {

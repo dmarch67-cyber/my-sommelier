@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 
 import { SignInScreen } from '../components/SignInScreen';
+import { ToastProvider } from '../components/Toast';
 import { CellarDataProvider } from '../data/CellarData';
 import { AuthProvider, useAuth } from '../lib/auth';
 import { colors } from '../lib/theme';
@@ -37,12 +38,14 @@ function Gate() {
   if (!session) return <SignInScreen />;
   return (
     <CellarDataProvider key={session.user.id}>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      />
+      <ToastProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
+      </ToastProvider>
     </CellarDataProvider>
   );
 }

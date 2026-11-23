@@ -32,5 +32,8 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
   "${PSQL[@]}" -f "$f"
 done
 # Query results go to /dev/null; each check reports itself as a NOTICE.
-"${PSQL[@]}" -o /dev/null -f "$ROOT/supabase/tests/schema_test.sql" 2>&1 \
-  | sed -E 's/^psql:[^ ]+ (NOTICE|INFO):  /  /'
+for t in "$ROOT"/supabase/tests/*_test.sql; do
+  echo "test: $(basename "$t")"
+  "${PSQL[@]}" -o /dev/null -f "$t" 2>&1 \
+    | sed -E 's/^psql:[^ ]+ (NOTICE|INFO):  /  /'
+done
