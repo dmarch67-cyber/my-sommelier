@@ -11,7 +11,9 @@ export type IconName =
   | 'search'
   | 'back'
   | 'close'
-  | 'chevron';
+  | 'chevron'
+  | 'camera'
+  | 'image';
 
 /** A small hand-drawn icon set (line icons, 24px grid). */
 export function Icon({
@@ -73,6 +75,22 @@ export function Icon({
       )}
       {name === 'back' && <Path d="M15 5l-7 7 7 7" {...p} />}
       {name === 'chevron' && <Path d="M9.5 6l6 6-6 6" {...p} />}
+      {name === 'camera' && (
+        <>
+          <Path
+            d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.5-2h5.6l1.5 2h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-9Z"
+            {...p}
+          />
+          <Circle cx={12} cy={13} r={3.5} {...p} />
+        </>
+      )}
+      {name === 'image' && (
+        <>
+          <Path d="M5 5h14v14H5z" {...p} />
+          <Circle cx={9.5} cy={9.5} r={1.5} {...p} />
+          <Path d="M5 16l4.5-4.5L14 16l2-2 3 3" {...p} />
+        </>
+      )}
       {name === 'close' && <Path d="M6.5 6.5l11 11M17.5 6.5l-11 11" {...p} />}
     </Svg>
   );
