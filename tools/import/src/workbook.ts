@@ -15,6 +15,8 @@ export interface SheetLayout {
   lastDataRow: number;
   /** Country / state when the sheet has no section header rows. */
   defaultSection?: string;
+  /** When a wine is on several sheets with different regions, this sheet's region is used. */
+  regionWins?: boolean;
   cols: {
     marker?: string;
     year: string;
@@ -83,6 +85,8 @@ export const LAYOUTS: SheetLayout[] = [
     firstDataRow: 2,
     lastDataRow: 52,
     defaultSection: 'OREGON',
+    // Dan, 2026-11-23: for wines on both the LA and Oregon sheets, use the Oregon tab's region.
+    regionWins: true,
     cols: {
       year: 'B',
       name: 'C',
