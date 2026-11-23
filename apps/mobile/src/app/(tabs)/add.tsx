@@ -15,6 +15,12 @@ export default function AddScreen() {
           Everything you add can be undone straight after.
         </T>
         <Option
+          icon="camera"
+          title="Snap the label"
+          text="Take a photo of the label and the app fills in the wine for you to check."
+          onPress={() => router.push('/add/label')}
+        />
+        <Option
           icon="mic"
           title="Type it or say it"
           text="“Six bottles of 2019 Ridge Monte Bello”. Finds wines you already have, or adds a new one."
@@ -25,11 +31,6 @@ export default function AddScreen() {
           title="Upload a delivery spreadsheet"
           text="Excel or CSV from a merchant. You check the list before anything is added. It only adds, never replaces."
           onPress={() => router.push('/add/upload')}
-        />
-        <Option
-          icon="glass"
-          title="Snap the label"
-          text="Take a photo and the app fills in the wine. Coming in the next build."
         />
       </ScrollView>
     </SafeAreaView>

@@ -28,7 +28,18 @@ function titleCase(s: string): string {
 type Done = { eventIds: string[]; summary: string };
 
 export default function AddManualScreen() {
-  const params = useLocalSearchParams<{ wineId?: string; vintage?: string }>();
+  const params = useLocalSearchParams<{
+    wineId?: string;
+    vintage?: string;
+    /** From Snap the label: a wine not in the cellar yet. */
+    name?: string;
+    country?: string;
+    region?: string;
+    appellation?: string;
+    size?: string;
+    from?: string;
+  }>();
+  const fromLabel = params.from === 'label';
   const data = useCellarData();
   const toast = useToast();
   const [lastCellar] = useLastCellar(data.cellars.map((c) => c.id));
@@ -58,7 +69,30 @@ export default function AddManualScreen() {
     setCellarId(lastCellar === ALL_CELLARS ? data.cellars[0].id : lastCellar);
   }, [cellarId, lastCellar, data.cellars]);
 
-  // Opened from a Wine page: that wine and vintage are already chosen.
+  // Opened from Snap the label with a new wine: its details are filled in.
+  useEffect(() => {
+    if (prefilled.current || params.wineId || !params.name) return;
+    prefilled.current = true;
+    setNewWine({
+      name: params.name,
+      country: params.country ?? '',
+      region: params.region ?? '',
+      appellation: params.appellation ?? '',
+    });
+    setVintage(params.vintage === 'NV' ? '' : (params.vintage ?? ''));
+    const size = Number(params.size);
+    if (SIZES.some((s) => s.ml === size)) setSizeMl(size);
+  }, [
+    params.wineId,
+    params.name,
+    params.country,
+    params.region,
+    params.appellation,
+    params.vintage,
+    params.size,
+  ]);
+
+  // Opened from a Wine page (or a label of a wine you have): that wine and vintage are already chosen.
   useEffect(() => {
     if (prefilled.current || !params.wineId || data.status !== 'ready') return;
     const row = data.inventory.find((r) => r.wine_id === params.wineId);
@@ -71,7 +105,9 @@ export default function AddManualScreen() {
       )[0] ?? null,
     );
     setVintage(params.vintage === 'NV' ? '' : (params.vintage ?? ''));
-  }, [params.wineId, params.vintage, data.status, data.inventory]);
+    const size = Number(params.size);
+    if (SIZES.some((s) => s.ml === size)) setSizeMl(size);
+  }, [params.wineId, params.vintage, params.size, data.status, data.inventory]);
 
   const parsed = useMemo(() => parseSpokenAdd(text), [text]);
   const matches = useMemo(
@@ -209,7 +245,10 @@ export default function AddManualScreen() {
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <T variant="title">Type it or say it</T>
+        <T variant="title">{fromLabel ? 'Check and add' : 'Type it or say it'}</T>
+        {fromLabel ? (
+          <T variant="caption">Filled in from the label. Fix anything that looks wrong.</T>
+        ) : null}
 
         <View style={styles.block}>
           <T variant="overline">Cellar</T>
