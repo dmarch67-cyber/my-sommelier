@@ -21,6 +21,7 @@ import {
   formatPrice,
   placeLine,
   ripeness,
+  scoreLabel,
   scoreValue,
   sourceName,
   type InventoryRow,
@@ -371,7 +372,7 @@ export default function WinePage() {
                   </View>
                   <View style={styles.scoreBadge}>
                     <T style={styles.scoreText}>
-                      {s.raw_value}
+                      {scoreLabel(s.raw_value)}
                       {s.scale_max !== 100 ? `/${s.scale_max}` : ''}
                     </T>
                   </View>

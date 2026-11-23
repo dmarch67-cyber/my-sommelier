@@ -149,7 +149,7 @@ export function groupInventory(
         onOrder: 0,
         cellarNames: [],
         score: best ? scoreValue(best) : null,
-        scoreText: best ? best.raw_value : null,
+        scoreText: best ? scoreLabel(best.raw_value) : null,
         drinkFrom: window.from,
         drinkTo: window.to,
       };
@@ -395,4 +395,9 @@ export function formatPrice(amount: number | null, currency: string | null): str
   } catch {
     return `${amount} ${currency}`;
   }
+}
+
+/** A score as shown: decimals rounded to whole points ("93.75" → "94", "92.5-94" → "93-94"). */
+export function scoreLabel(raw: string): string {
+  return raw.replace(/\d+\.\d+/g, (n) => String(Math.round(Number(n))));
 }
