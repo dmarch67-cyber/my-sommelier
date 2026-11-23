@@ -8,13 +8,14 @@ v1 is for one user with three cellars (Los Angeles, Oregon, Paris). The design a
 
 - **App:** React Native + Expo (TypeScript). Android first, then web, then iPhone from the same code.
 - **Backend:** Supabase: Postgres, sign-in, and row-level security so each account sees only its own data.
-- **Offline:** PowerSync keeps an on-device SQLite copy in sync with Postgres.
+- **Offline:** PowerSync will keep an on-device SQLite copy in sync with Postgres (added with the Android build; stage 1 reads Supabase directly).
+- **Web preview:** Vercel builds `apps/mobile` from `vercel.json`; every pull request gets a preview link.
 
 ## Layout
 
 | Path              | What                                                                 |
 | ----------------- | -------------------------------------------------------------------- |
-| `apps/mobile`     | The Expo app (Phase 2)                                               |
+| `apps/mobile`     | The Expo app. See [`apps/mobile/README.md`](apps/mobile/README.md).  |
 | `packages/shared` | Types and helpers shared by the app and tools                        |
 | `tools/import`    | One-time spreadsheet importer (Phase 1)                              |
 | `supabase/`       | Database migrations, tests and local config                          |

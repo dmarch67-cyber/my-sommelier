@@ -1,0 +1,345 @@
+import { router, useLocalSearchParams } from 'expo-router';
+import { useMemo } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { Icon } from '../../components/Icon';
+import { LabelArt } from '../../components/LabelArt';
+import { RipenessBar } from '../../components/RipenessBar';
+import { Button, Card, Placeholder, Section, T } from '../../components/ui';
+import { useCellarData } from '../../data/CellarData';
+import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
+import {
+  countsLine,
+  drinkWindow,
+  formatPrice,
+  placeLine,
+  ripeness,
+  scoreValue,
+  sourceName,
+  type InventoryRow,
+} from '../../logic/cellar';
+
+const COLOUR_NAMES: Record<string, string> = {
+  red: 'Red',
+  white: 'White',
+  rose: 'Rosé',
+  sparkling: 'Sparkling',
+  sweet: 'Sweet',
+  fortified: 'Fortified',
+  orange: 'Orange',
+};
+
+export default function WinePage() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const data = useCellarData();
+  const year = new Date().getFullYear();
+
+  const view = useMemo(() => {
+    const rows = data.inventory.filter((r) => r.vintage_id === id);
+    if (rows.length === 0) return null;
+    const first = rows[0];
+    const scores = data.scores
+      .filter((s) => s.vintage_id === id)
+      .sort((a, b) => (scoreValue(b) ?? 0) - (scoreValue(a) ?? 0));
+    const accolades = data.accolades
+      .filter((a) => a.vintage_id === id)
+      .sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+    const window = drinkWindow(first.drink_from, first.drink_to, data.bestScores.get(id) ?? null);
+
+    // Bottles per cellar, in the cellars' usual order.
+    const order = new Map(data.cellars.map((c, i) => [c.id, i]));
+    const perCellar = new Map<string, { name: string; rows: InventoryRow[] }>();
+    for (const r of rows) {
+      const entry = perCellar.get(r.cellar_id) ?? { name: r.cellar_name, rows: [] };
+      entry.rows.push(r);
+      perCellar.set(r.cellar_id, entry);
+    }
+    const cellars = [...perCellar.entries()]
+      .sort(([a], [b]) => (order.get(a) ?? 99) - (order.get(b) ?? 99))
+      .map(([cellarId, { name, rows: cellarRows }]) => ({
+        cellarId,
+        name,
+        bottles: cellarRows.reduce((n, r) => n + r.quantity, 0),
+        magnums: cellarRows.reduce((n, r) => n + (r.bottle_size_ml === 1500 ? r.quantity : 0), 0),
+        onOrder: cellarRows.reduce((n, r) => n + r.quantity_on_order, 0),
+        prices: [
+          ...new Set(
+            cellarRows
+              .map((r) =>
+                formatPrice(r.unit_price, r.currency)?.concat(
+                  r.is_non_standard_size ? ` (${r.bottle_size_label.toLowerCase()})` : '',
+                ),
+              )
+              .filter(Boolean),
+          ),
+        ] as string[],
+      }));
+
+    // Other vintages of the same wine that are in the cellars.
+    const others = new Map<
+      string,
+      { vintageId: string; vintage: number | null; bottles: number }
+    >();
+    for (const r of data.inventory) {
+      if (r.wine_id !== first.wine_id || r.vintage_id === id) continue;
+      const o = others.get(r.vintage_id) ?? {
+        vintageId: r.vintage_id,
+        vintage: r.vintage,
+        bottles: 0,
+      };
+      o.bottles += r.quantity + r.quantity_on_order;
+      others.set(r.vintage_id, o);
+    }
+
+    return {
+      wine: first,
+      scores,
+      accolades,
+      ripeness: ripeness(window.from, window.to, year),
+      cellars,
+      total: {
+        bottles: cellars.reduce((n, c) => n + c.bottles, 0),
+        magnums: cellars.reduce((n, c) => n + c.magnums, 0),
+        onOrder: cellars.reduce((n, c) => n + c.onOrder, 0),
+      },
+      others: [...others.values()]
+        .filter((o) => o.bottles > 0)
+        .sort((a, b) => (a.vintage ?? 0) - (b.vintage ?? 0)),
+    };
+  }, [data, id, year]);
+
+  const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
+  if (data.status !== 'ready') {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+  if (!view) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <TopBar onBack={back} />
+        <View style={styles.center}>
+          <T variant="heading">Wine not found</T>
+          <T variant="caption">It may have been removed from your cellar.</T>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const { wine } = view;
+  const place = placeLine(wine);
+  const style = [wine.colour ? COLOUR_NAMES[wine.colour] : null].filter(Boolean).join(' · ');
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <TopBar onBack={back} />
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.hero}>
+          <LabelArt
+            name={wine.wine_name}
+            vintage={wine.vintage}
+            colour={wine.colour}
+            size="large"
+          />
+          <View style={{ alignItems: 'center', gap: space.xs }}>
+            <T variant="title" style={{ textAlign: 'center' }}>
+              {wine.wine_name}
+            </T>
+            <T variant="heading" style={{ color: colors.textMuted, fontFamily: fonts.medium }}>
+              {wine.vintage ?? 'Non-vintage'}
+            </T>
+            {place ? (
+              <T variant="body" style={{ color: colors.textMuted, textAlign: 'center' }}>
+                {place}
+              </T>
+            ) : null}
+            <T variant="caption" style={{ textAlign: 'center' }}>
+              {style || 'Grape and style not known yet'}
+            </T>
+          </View>
+        </View>
+
+        <View style={styles.actions}>
+          <Button label="Drink one" disabled style={{ flex: 1 }} />
+          <Button label="Add bottles" kind="secondary" disabled style={{ flex: 1 }} />
+        </View>
+        <T variant="caption" style={{ textAlign: 'center', marginTop: space.sm }}>
+          Drink one and Add bottles arrive in the next build.
+        </T>
+
+        <Section title="Drinking window">
+          <Card>
+            <RipenessBar r={view.ripeness} />
+          </Card>
+        </Section>
+
+        <Section title="In your cellars" note={countsLine(view.total)}>
+          <Card style={{ paddingVertical: space.xs }}>
+            {view.cellars.map((c, i) => (
+              <View key={c.cellarId} style={[styles.cellarRow, i > 0 && styles.rowDivider]}>
+                <View style={{ flex: 1 }}>
+                  <T variant="bodyStrong">{c.name}</T>
+                  {c.prices.length > 0 ? (
+                    <T variant="caption">Paid {c.prices.join(', ')} a bottle</T>
+                  ) : null}
+                </View>
+                <T variant="body">{countsLine(c)}</T>
+              </View>
+            ))}
+          </Card>
+        </Section>
+
+        <Section title="Scores">
+          {view.scores.length === 0 ? (
+            <Placeholder text="No scores yet. Critic and community scores will be added from Vinous and CellarTracker." />
+          ) : (
+            <Card style={{ paddingVertical: space.xs }}>
+              {view.scores.map((s, i) => (
+                <View key={s.id} style={[styles.cellarRow, i > 0 && styles.rowDivider]}>
+                  <View style={{ flex: 1 }}>
+                    <T variant="bodyStrong">{sourceName(s)}</T>
+                    <T variant="caption">
+                      {s.source === 'unknown'
+                        ? 'From your spreadsheet'
+                        : [s.reviewed_on, s.is_barrel_sample ? 'Barrel sample' : null]
+                            .filter(Boolean)
+                            .join(' · ')}
+                    </T>
+                  </View>
+                  <View style={styles.scoreBadge}>
+                    <T style={styles.scoreText}>
+                      {s.raw_value}
+                      {s.scale_max !== 100 ? `/${s.scale_max}` : ''}
+                    </T>
+                  </View>
+                </View>
+              ))}
+            </Card>
+          )}
+          {view.accolades.map((a) => (
+            <View key={a.id} style={styles.accolade}>
+              <T variant="bodyStrong" style={{ color: colors.accent }}>
+                {a.rank ? `#${a.rank} ` : ''}
+                {a.title ?? a.raw_text}
+              </T>
+              <T variant="caption">{[a.publication, a.year].filter(Boolean).join(' · ')}</T>
+            </View>
+          ))}
+        </Section>
+
+        <Section title="What critics and drinkers say">
+          <Placeholder text="A two- or three-sentence summary of recent critic and community notes will appear here, with a link to the full notes." />
+        </Section>
+
+        <Section title="Food matches">
+          <Placeholder text="Dishes that suit this wine will appear here." />
+        </Section>
+
+        {view.others.length > 0 && (
+          <Section title="Other vintages in your cellars">
+            <View style={styles.others}>
+              {view.others.map((o) => (
+                <Pressable
+                  key={o.vintageId}
+                  onPress={() =>
+                    router.push({ pathname: '/wine/[id]', params: { id: o.vintageId } })
+                  }
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.other,
+                    pressed && { backgroundColor: colors.border },
+                  ]}
+                >
+                  <T variant="bodyStrong">{o.vintage ?? 'NV'}</T>
+                  <T variant="caption">{o.bottles} btl</T>
+                </Pressable>
+              ))}
+            </View>
+          </Section>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function TopBar({ onBack }: { onBack: () => void }) {
+  return (
+    <View style={styles.topBar}>
+      <Pressable
+        onPress={onBack}
+        accessibilityRole="button"
+        accessibilityLabel="Back to cellar"
+        hitSlop={10}
+        style={styles.backButton}
+      >
+        <Icon name="back" size={22} color={colors.text} />
+        <T variant="body">Cellar</T>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm },
+  topBar: {
+    width: '100%',
+    maxWidth: MAX_CONTENT_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: space.sm,
+    paddingVertical: space.sm,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    padding: space.sm,
+    alignSelf: 'flex-start',
+  },
+  scroll: {
+    width: '100%',
+    maxWidth: MAX_CONTENT_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: space.lg,
+    paddingBottom: 48,
+  },
+  hero: { alignItems: 'center', gap: space.lg, paddingTop: space.sm },
+  actions: { flexDirection: 'row', gap: space.md, marginTop: space.xl },
+  cellarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingVertical: space.md,
+  },
+  rowDivider: { borderTopWidth: 1, borderTopColor: colors.border },
+  scoreBadge: {
+    minWidth: 48,
+    paddingHorizontal: space.sm,
+    height: 32,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.accent },
+  accolade: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.md,
+    padding: space.md,
+    gap: 2,
+  },
+  others: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  other: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    alignItems: 'center',
+  },
+});
