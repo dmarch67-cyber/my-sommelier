@@ -9,9 +9,9 @@
 // Runs at most once a day per account unless called with {"force": true}.
 // Secrets (set in the Supabase dashboard, never in code or chat):
 //   CT_USERNAME, CT_PASSWORD  the owner's CellarTracker login
-//   CT_OWNER_EMAIL            the app sign-in allowed to use that login
-// The login belongs to one person, so only that sign-in may use it. Other
-// users will need their own CellarTracker connection before this is opened up.
+// The login belongs to one person, so its facts only go into that person's
+// account (CT_OWNER_ACCOUNT, or Dan's account by default). Other users will
+// need their own CellarTracker connection before this is opened up.
 
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
 
@@ -22,6 +22,8 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+// Dan's account. Not a secret: row-level security still decides who can write to it.
+const DEFAULT_OWNER_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
 const DAY_MS = 20 * 60 * 60 * 1000; // "once a day", with some slack
 
 function reply(status: number, body: unknown): Response {
@@ -37,8 +39,8 @@ Deno.serve(async (req) => {
 
   const ctUser = Deno.env.get('CT_USERNAME');
   const ctPassword = Deno.env.get('CT_PASSWORD');
-  const ownerEmail = (Deno.env.get('CT_OWNER_EMAIL') ?? '').trim().toLowerCase();
-  if (!ctUser || !ctPassword || !ownerEmail) {
+  const ownerAccount = (Deno.env.get('CT_OWNER_ACCOUNT') ?? DEFAULT_OWNER_ACCOUNT).trim();
+  if (!ctUser || !ctPassword) {
     return reply(200, { skipped: 'not_set_up' });
   }
 
@@ -52,8 +54,6 @@ Deno.serve(async (req) => {
   });
   const { data: who, error: authError } = await db.auth.getUser(token);
   if (authError || !who?.user) return reply(401, { error: 'Sign in first.' });
-  if ((who.user.email ?? '').toLowerCase() !== ownerEmail)
-    return reply(200, { skipped: 'not_owner' });
 
   let force = false;
   try {
@@ -62,16 +62,16 @@ Deno.serve(async (req) => {
     // no body
   }
 
-  // The owner's account (the one they can write to).
+  // Only a member who can write to the owner's account may use the login.
   const { data: member } = await db
     .from('account_members')
     .select('account_id,role')
     .eq('user_id', who.user.id)
+    .eq('account_id', ownerAccount)
     .in('role', ['owner', 'editor'])
-    .limit(1)
     .maybeSingle();
-  if (!member) return reply(200, { skipped: 'no_account' });
-  const accountId = member.account_id as string;
+  if (!member) return reply(200, { skipped: 'not_owner' });
+  const accountId = ownerAccount;
 
   if (!force) {
     const { data: last } = await db
@@ -155,6 +155,12 @@ Deno.serve(async (req) => {
     matched: matches.length,
     unmatched_app: unmatchedApp,
     unmatched_ct: unmatchedCt,
+    // A few unmatched names from each side, to check the matching by eye.
+    unmatched_app_sample: vintages
+      .filter((v) => !matches.some((m) => m.vintage_id === v.vintage_id))
+      .slice(0, 25)
+      .map((v) => `${v.wine_name} ${v.year ?? 'NV'}`),
+    ct_sample: rows.slice(0, 25).map((r) => `${r.Wine} ${r.Vintage}`),
     applied,
   };
   await log(true, summary);
