@@ -6,6 +6,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, View } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '../../components/Icon';
+import { canUseWebcam, WebCamera } from '../../components/WebCamera';
 import { Button, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
 import { LabelError, readLabel } from '../../data/readLabel';
@@ -24,6 +25,7 @@ const MAX_SIDE = 1568;
 
 type State =
   | { step: 'pick' }
+  | { step: 'webcam' }
   | { step: 'reading'; uri: string }
   | { step: 'read'; uri: string; reading: LabelReading }
   | { step: 'failed'; uri: string | null; message: string; setup: boolean };
@@ -52,7 +54,30 @@ export default function LabelScreen() {
 
   const back = () => (router.canGoBack() ? router.back() : router.replace('/add'));
 
+  const read = async (photo: { uri: string; base64: string }) => {
+    setState({ step: 'reading', uri: photo.uri });
+    try {
+      const reading = await readLabel(photo.base64, 'image/jpeg', known);
+      setState({ step: 'read', uri: photo.uri, reading });
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const fail = (e: unknown) =>
+    setState({
+      step: 'failed',
+      uri: null,
+      message: e instanceof Error ? e.message : String(e),
+      setup: e instanceof LabelError && (e.code === 'no_key' || e.code === 'bad_key'),
+    });
+
   const take = async (camera: boolean) => {
+    // On a computer's browser, use the webcam live in the page.
+    if (camera && canUseWebcam()) {
+      setState({ step: 'webcam' });
+      return;
+    }
     try {
       if (camera) {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -75,15 +100,9 @@ export default function LabelScreen() {
       const asset = res.assets[0];
       setState({ step: 'reading', uri: asset.uri });
       const photo = await shrink(asset);
-      const reading = await readLabel(photo.base64, 'image/jpeg', known);
-      setState({ step: 'read', uri: asset.uri, reading });
+      await read({ uri: asset.uri, base64: photo.base64 });
     } catch (e) {
-      setState({
-        step: 'failed',
-        uri: null,
-        message: e instanceof Error ? e.message : String(e),
-        setup: e instanceof LabelError && (e.code === 'no_key' || e.code === 'bad_key'),
-      });
+      fail(e);
     }
   };
 
@@ -109,6 +128,15 @@ export default function LabelScreen() {
               <BigButton icon="image" label="Choose a photo" onPress={() => take(false)} />
             </View>
           </>
+        )}
+
+        {state.step === 'webcam' && (
+          <WebCamera
+            maxSide={MAX_SIDE}
+            onSnap={read}
+            onCancel={() => setState({ step: 'pick' })}
+            onError={(message) => setState({ step: 'failed', uri: null, message, setup: false })}
+          />
         )}
 
         {state.step === 'reading' && (
