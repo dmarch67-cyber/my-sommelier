@@ -16,6 +16,7 @@ export type Cellar = {
 /** One row of the cellar_inventory view (one holding). */
 export type InventoryRow = {
   holding_id: string;
+  account_id: string;
   cellar_id: string;
   cellar_name: string;
   wine_id: string;
@@ -63,6 +64,24 @@ export type Accolade = {
   title: string | null;
   rank: number | null;
   year: number | null;
+};
+
+export type Maturity = 'too_young' | 'approaching' | 'ready' | 'peak' | 'declining' | 'past_it';
+
+/** The user's own note (tasting_notes). rating is out of 100; the app shows stars (20 per star). */
+export type TastingNote = {
+  id: string;
+  account_id: string;
+  vintage_id: string;
+  inventory_event_id: string | null;
+  tasted_on: string;
+  rating: number | null;
+  maturity: Maturity | null;
+  notes: string | null;
+  food_pairing: string | null;
+  occasion: string | null;
+  would_buy_again: boolean | null;
+  created_at: string;
 };
 
 /** "all" or a cellar id. */

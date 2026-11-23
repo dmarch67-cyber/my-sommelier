@@ -1,13 +1,19 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Stars } from '../../components/controls';
 import { Icon } from '../../components/Icon';
 import { LabelArt } from '../../components/LabelArt';
 import { RipenessBar } from '../../components/RipenessBar';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
+import { useToast } from '../../components/Toast';
+import { formatDay } from '../../lib/format';
 import { useCellarData } from '../../data/CellarData';
+import { useLastCellar } from '../../data/lastCellar';
+import { drinkOne, markDelivered, undoEvents } from '../../data/writes';
+import { defaultDrinkChoice, drinkChoices, type DrinkChoice } from '../../logic/adding';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
 import {
   countsLine,
@@ -33,6 +39,10 @@ const COLOUR_NAMES: Record<string, string> = {
 export default function WinePage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const data = useCellarData();
+  const toast = useToast();
+  const [lastCellar] = useLastCellar(data.cellars.map((c) => c.id));
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
   const year = new Date().getFullYear();
 
   const view = useMemo(() => {
@@ -60,6 +70,7 @@ export default function WinePage() {
       .map(([cellarId, { name, rows: cellarRows }]) => ({
         cellarId,
         name,
+        onOrderRows: cellarRows.filter((r) => r.quantity_on_order > 0),
         bottles: cellarRows.reduce((n, r) => n + r.quantity, 0),
         magnums: cellarRows.reduce((n, r) => n + (r.bottle_size_ml === 1500 ? r.quantity : 0), 0),
         onOrder: cellarRows.reduce((n, r) => n + r.quantity_on_order, 0),
@@ -92,8 +103,18 @@ export default function WinePage() {
       others.set(r.vintage_id, o);
     }
 
+    const notes = data.notes
+      .filter((n) => n.vintage_id === id)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
     return {
       wine: first,
+      rows,
+      notes,
+      choices: drinkChoices(
+        rows,
+        data.cellars.map((c) => c.id),
+      ),
       scores,
       accolades,
       ripeness: ripeness(window.from, window.to, year),
@@ -110,6 +131,59 @@ export default function WinePage() {
   }, [data, id, year]);
 
   const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
+  /** Takes the bottle out at once, then opens the (optional) note. */
+  const drink = async (choice: DrinkChoice) => {
+    setPicking(false);
+    setBusy(true);
+    try {
+      const eventId = await drinkOne(choice.holding);
+      data.reload();
+      router.push({
+        pathname: '/drink-note',
+        params: {
+          eventId,
+          vintageId: choice.holding.vintage_id,
+          cellarName: choice.cellarName,
+          left: String(choice.bottles - 1),
+          size: choice.sizeMl === 750 ? '' : choice.sizeLabel.toLowerCase(),
+        },
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDrinkPress = () => {
+    if (!view) return;
+    const choice = defaultDrinkChoice(view.choices, lastCellar);
+    if (choice) drink(choice);
+    else setPicking(true);
+  };
+
+  const arrived = async (rows: InventoryRow[], cellarName: string) => {
+    const count = rows.reduce((n, r) => n + r.quantity_on_order, 0);
+    setBusy(true);
+    try {
+      const ids: string[] = [];
+      for (const r of rows) ids.push(await markDelivered(r, r.quantity_on_order));
+      await data.reload();
+      toast(`${count} ${count === 1 ? 'bottle' : 'bottles'} arrived in ${cellarName}.`, {
+        label: 'Undo',
+        onPress: async () => {
+          await undoEvents(ids);
+          await data.reload();
+          toast('Back on order.');
+        },
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (data.status !== 'ready') {
     return (
@@ -166,12 +240,62 @@ export default function WinePage() {
         </View>
 
         <View style={styles.actions}>
-          <Button label="Drink one" disabled style={{ flex: 1 }} />
-          <Button label="Add bottles" kind="secondary" disabled style={{ flex: 1 }} />
+          <Button
+            label="Drink one"
+            onPress={onDrinkPress}
+            disabled={view.choices.length === 0}
+            loading={busy}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Add bottles"
+            kind="secondary"
+            onPress={() =>
+              router.push({
+                pathname: '/add/manual',
+                params: {
+                  wineId: wine.wine_id,
+                  vintage: wine.vintage == null ? 'NV' : String(wine.vintage),
+                },
+              })
+            }
+            style={{ flex: 1 }}
+          />
         </View>
-        <T variant="caption" style={{ textAlign: 'center', marginTop: space.sm }}>
-          Drink one and Add bottles arrive in the next build.
-        </T>
+        {view.choices.length === 0 && (
+          <T variant="caption" style={{ textAlign: 'center', marginTop: space.sm }}>
+            No bottles left in the cellar.
+          </T>
+        )}
+        {picking && (
+          <Card style={{ marginTop: space.md, gap: space.sm }}>
+            <T variant="bodyStrong">Which bottle?</T>
+            {view.choices.map((c) => (
+              <Pressable
+                key={`${c.cellarId}-${c.sizeMl}`}
+                onPress={() => drink(c)}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.choice,
+                  pressed && { backgroundColor: colors.border },
+                ]}
+              >
+                <T variant="body">
+                  {c.cellarName}
+                  {c.sizeMl !== 750 ? ` · ${c.sizeLabel}` : ''}
+                </T>
+                <T variant="caption">{c.bottles} left</T>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setPicking(false)}
+              accessibilityRole="button"
+              style={{ alignSelf: 'center', padding: space.sm }}
+            >
+              <T variant="caption">Cancel</T>
+            </Pressable>
+          </Card>
+        )}
 
         <Section title="Drinking window">
           <Card>
@@ -189,7 +313,25 @@ export default function WinePage() {
                     <T variant="caption">Paid {c.prices.join(', ')} a bottle</T>
                   ) : null}
                 </View>
-                <T variant="body">{countsLine(c)}</T>
+                <View style={{ alignItems: 'flex-end', gap: space.xs }}>
+                  <T variant="body">{countsLine(c)}</T>
+                  {c.onOrderRows.length > 0 && (
+                    <Pressable
+                      onPress={() => arrived(c.onOrderRows, c.name)}
+                      disabled={busy}
+                      accessibilityRole="button"
+                      hitSlop={6}
+                      style={styles.smallButton}
+                    >
+                      <T
+                        variant="caption"
+                        style={{ color: colors.accent, fontFamily: fonts.semibold }}
+                      >
+                        Order arrived
+                      </T>
+                    </Pressable>
+                  )}
+                </View>
               </View>
             ))}
           </Card>
@@ -206,7 +348,7 @@ export default function WinePage() {
                     <T variant="bodyStrong">{sourceName(s)}</T>
                     <T variant="caption">
                       {s.source === 'unknown'
-                        ? 'From your spreadsheet'
+                        ? 'From your records'
                         : [s.reviewed_on, s.is_barrel_sample ? 'Barrel sample' : null]
                             .filter(Boolean)
                             .join(' · ')}
@@ -232,6 +374,34 @@ export default function WinePage() {
             </View>
           ))}
         </Section>
+
+        {view.notes.length > 0 && (
+          <Section title="Your notes">
+            {view.notes.map((n) => (
+              <Card key={n.id} style={{ gap: space.xs }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Stars value={n.rating ? Math.round(n.rating / 20) : null} size={18} />
+                  <T variant="caption">{formatDay(n.tasted_on)}</T>
+                </View>
+                {n.notes ? <T variant="body">{n.notes}</T> : null}
+                {[n.food_pairing && `With ${n.food_pairing}`, n.occasion].filter(Boolean).length >
+                0 ? (
+                  <T variant="caption">
+                    {[n.food_pairing && `With ${n.food_pairing}`, n.occasion]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </T>
+                ) : null}
+              </Card>
+            ))}
+          </Section>
+        )}
 
         <Section title="What critics and drinkers say">
           <Placeholder text="A two- or three-sentence summary of recent critic and community notes will appear here, with a link to the full notes." />
@@ -335,6 +505,21 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   others: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  choice: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: space.lg,
+    minHeight: 50,
+  },
+  smallButton: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+  },
   other: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
