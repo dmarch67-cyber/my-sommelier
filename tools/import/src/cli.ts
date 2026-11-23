@@ -4,6 +4,9 @@
 //   Dry run (default; reads the workbook only, connects to nothing):
 //     node src/cli.ts <workbook.xlsx> [--out <dir>] [--expect expected/checkpoint-b.json]
 //
+//   SQL scripts instead of a connection (e.g. through the Supabase connector):
+//     node src/cli.ts <workbook.xlsx> --sql <dir> (--owner-email <email> | --account-id <uuid>)
+//
 //   Real import (after the dry run is approved):
 //     DATABASE_URL=postgres://... node src/cli.ts <workbook.xlsx> --apply \
 //       (--owner-email <email> | --account-id <uuid>) [--rollback]
@@ -15,6 +18,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { applyPlan } from './apply.ts';
+import { planToSql } from './sql.ts';
 import { buildPlan } from './plan.ts';
 import {
   reconcile,
@@ -32,6 +36,8 @@ const { values, positionals } = parseArgs({
     expect: { type: 'string' },
     apply: { type: 'boolean', default: false },
     rollback: { type: 'boolean', default: false },
+    sql: { type: 'string' },
+    'chunk-bytes': { type: 'string' },
     'database-url': { type: 'string' },
     'account-id': { type: 'string' },
     'owner-email': { type: 'string' },
@@ -83,6 +89,27 @@ for (const c of checks)
 if (plan.problems.length)
   console.log(`${plan.problems.length} line(s) could not be mapped; see the report.`);
 console.log(`Report: ${join(outDir, `${stem}.md`)}`);
+
+if (values.sql) {
+  // SQL scripts for running the import through a SQL-only connection.
+  if (!countsOk) {
+    console.error('Refusing to write SQL: the dry-run checks above do not all pass.');
+    process.exit(1);
+  }
+  const dir = resolve(values.sql);
+  await mkdir(dir, { recursive: true });
+  const scripts = planToSql(plan, {
+    accountId: values['account-id'],
+    ownerEmail: values['owner-email'],
+    maxBytes: values['chunk-bytes'] ? Number(values['chunk-bytes']) : undefined,
+  });
+  for (const s of scripts) await writeFile(join(dir, s.name), s.sql);
+  const biggest = Math.max(...scripts.map((s) => Buffer.byteLength(s.sql)));
+  console.log(
+    `SQL: ${scripts.length} scripts in ${dir} (largest ${biggest} bytes). Run them in name order, then 90-verify; undo.sql if anything fails.`,
+  );
+  process.exit(0);
+}
 
 if (!values.apply) process.exit(countsOk ? 0 : 1);
 

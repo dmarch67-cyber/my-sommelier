@@ -34,6 +34,17 @@ npm run import -w tools/import -- ~/path/to/My_Wine_Inventory.xlsx \
 - Then counts bottles from the database itself and rolls everything back if any cellar's lines, bottles in the cellar, bottles on order or magnums differ from the dry run.
 - Add `--rollback` to do all of that and then roll back anyway: a rehearsal against the real database that leaves nothing behind.
 
+## 2b. Real import without a database connection (SQL scripts)
+
+Where only SQL can be run (for example through the Supabase connector), write the same plan as small scripts instead:
+
+```sh
+npm run import -w tools/import -- ~/path/to/My_Wine_Inventory.xlsx \
+  --expect expected/checkpoint-b.json --sql import-output/sql --owner-email <owner's sign-in email>
+```
+
+This writes about 15 scripts of at most 20 KB each (`--chunk-bytes` changes the size). Run them in name order. `00-begin` checks the account and refuses one that already has imported holdings, then creates the cellars. The data scripts follow. `90-verify` counts from the database and raises if anything differs from the dry run. Each script commits on its own, so if one fails, run `undo.sql`, which removes that account's imported rows, and start again from `00-begin`. Row ids come from the account plus a row number, and `import_ref` keeps the sheet and row; the raw cells stay in the dry-run JSON.
+
 ## Tests
 
 ```sh

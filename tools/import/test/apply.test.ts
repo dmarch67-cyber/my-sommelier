@@ -140,3 +140,45 @@ test('an unknown owner is an error, not a new account', { skip }, async () => {
     /found 0/,
   );
 });
+
+test('the SQL scripts import the fixture, verify, and undo cleanly', { skip }, async () => {
+  const { planToSql } = await import('../src/sql.ts');
+  const accountId = await signUp('sql@example.test');
+  const plan = await freshPlan();
+  const scripts = planToSql(plan, { ownerEmail: 'sql@example.test', maxBytes: 1_700 });
+  assert.ok(
+    scripts.filter((s) => s.name.includes('events')).length > 1,
+    'events split into chunks',
+  );
+  for (const s of scripts) assert.ok(Buffer.byteLength(s.sql) < 6_000, `${s.name} is small`);
+  const run = (name: string) =>
+    withClient((c) => c.query(scripts.find((s) => s.name === name)!.sql));
+  for (const s of scripts.filter((s) => s.name !== 'undo.sql')) await run(s.name);
+
+  const want = countsByCellar(plan);
+  const got = await withClient((c) =>
+    c.query(
+      `select c.name, sum(h.quantity)::int q, sum(h.quantity_on_order)::int o from public.cellars c
+         join public.holdings h on h.cellar_id = c.id where c.account_id = $1 group by c.name`,
+      [accountId],
+    ),
+  );
+  for (const w of want) {
+    const g = got.rows.find((r) => r.name === w.cellar);
+    assert.deepEqual([g.q, g.o], [w.inCellar, w.onOrder], w.cellar);
+  }
+  assert.equal(await count(accountId, 'inventory_events'), plan.events.length);
+  // Notes rebuilt in SQL match the plan's wording.
+  const notes = await withClient((c) =>
+    c.query('select note from public.inventory_events where account_id = $1', [accountId]),
+  );
+  assert.deepEqual(notes.rows.map((r) => r.note).sort(), plan.events.map((e) => e.note).sort());
+
+  // A second begin refuses; undo leaves nothing.
+  await assert.rejects(run('00-begin.sql'), /refusing to import twice/);
+  await run('undo.sql');
+  for (const t of ['holdings', 'wines', 'vintages', 'scores', 'cellars', 'inventory_events'])
+    assert.equal(await count(accountId, t), 0, t);
+  // And verify now fails loudly.
+  await assert.rejects(run('90-verify.sql'), /differ/);
+});
