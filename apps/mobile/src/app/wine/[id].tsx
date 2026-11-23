@@ -36,6 +36,12 @@ const COLOUR_NAMES: Record<string, string> = {
   orange: 'Orange',
 };
 
+const BODY_NAMES: Record<string, string> = {
+  light: 'Light',
+  medium: 'Medium',
+  full: 'Full',
+};
+
 export default function WinePage() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const data = useCellarData();
@@ -208,7 +214,13 @@ export default function WinePage() {
 
   const { wine } = view;
   const place = placeLine(wine);
-  const style = [wine.colour ? COLOUR_NAMES[wine.colour] : null].filter(Boolean).join(' · ');
+  const style = [
+    wine.colour ? COLOUR_NAMES[wine.colour] : null,
+    wine.body ? BODY_NAMES[wine.body] : null,
+    wine.grapes?.length ? wine.grapes.join(', ') : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -299,7 +311,10 @@ export default function WinePage() {
 
         <Section title="Drinking window">
           <Card>
-            <RipenessBar r={view.ripeness} />
+            <RipenessBar
+              r={view.ripeness}
+              estimate={view.wine.drink_window_source === 'estimate'}
+            />
           </Card>
         </Section>
 
