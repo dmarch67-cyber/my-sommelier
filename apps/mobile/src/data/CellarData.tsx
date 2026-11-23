@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 
 import { supabase } from '../lib/supabase';
+import { fillInWines } from './enrich';
 import {
   bestScoreByVintage,
   type Accolade,
@@ -74,6 +75,9 @@ const INVENTORY_COLUMNS = [
   'quantity_on_order',
   'unit_price',
   'currency',
+  'body',
+  'grapes',
+  'drink_window_source',
 ].join(',');
 
 const SCORE_COLUMNS =
@@ -119,6 +123,19 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Once the cellar has loaded, quietly fill in missing wine facts (colour,
+  // body, grapes, drinking windows) and refresh as they arrive. Runs once per
+  // app start; when everything is filled in it is a single quick call.
+  const loaded = state.status === 'ready';
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    fillInWines(() => !cancelled, reload);
+    return () => {
+      cancelled = true;
+    };
+  }, [loaded, reload]);
 
   const bestScores = useMemo(() => bestScoreByVintage(state.scores), [state.scores]);
   const retry = useCallback(async () => {

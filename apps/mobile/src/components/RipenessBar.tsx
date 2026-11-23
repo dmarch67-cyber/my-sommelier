@@ -16,7 +16,16 @@ const STATE_COLOR: Record<Ripeness['state'], string> = {
  * The drinking-window bar: the window is the filled part, the dot is this
  * year. Compact form (for list rows) is just the bar.
  */
-export function RipenessBar({ r, compact }: { r: Ripeness; compact?: boolean }) {
+export function RipenessBar({
+  r,
+  compact,
+  estimate,
+}: {
+  r: Ripeness;
+  compact?: boolean;
+  /** The window was filled in automatically, not taken from a critic. */
+  estimate?: boolean;
+}) {
   const known = r.windowStart != null && r.windowEnd != null && r.marker != null;
   return (
     <View style={{ gap: space.sm }}>
@@ -54,10 +63,11 @@ export function RipenessBar({ r, compact }: { r: Ripeness; compact?: boolean }) 
           <T variant="caption">{r.barTo}</T>
         </View>
       )}
+      {!compact && known && estimate && (
+        <T variant="caption">Estimated window. Critic windows will replace it as they come in.</T>
+      )}
       {!compact && !known && (
-        <T variant="caption">
-          Windows will be filled in from Vinous and CellarTracker in a later build.
-        </T>
+        <T variant="caption">No drinking window yet. It will be filled in shortly.</T>
       )}
     </View>
   );

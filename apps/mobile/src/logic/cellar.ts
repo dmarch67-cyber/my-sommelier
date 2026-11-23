@@ -37,6 +37,11 @@ export type InventoryRow = {
   quantity_on_order: number;
   unit_price: number | null;
   currency: string | null;
+  /** Filled in automatically (enrichment); absent in older test fixtures. */
+  body?: string | null;
+  grapes?: string[];
+  /** 'estimate' when the window was filled in automatically rather than from a critic. */
+  drink_window_source?: string | null;
 };
 
 export type Score = {
