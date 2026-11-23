@@ -136,3 +136,10 @@ test('schema and batch size are sensible', () => {
   assert.ok(BATCH_SIZE > 0 && BATCH_SIZE <= 25);
   assert.deepEqual(FILL_SCHEMA.properties.wines.items.properties.colour.enum.at(-1), 'unknown');
 });
+
+test('scores are shown as whole points', async () => {
+  const { scoreLabel } = await import('../src/logic/cellar.ts');
+  assert.equal(scoreLabel('93.7547169811321'), '94');
+  assert.equal(scoreLabel('92.5-94'), '93-94');
+  assert.equal(scoreLabel('97+'), '97+');
+});

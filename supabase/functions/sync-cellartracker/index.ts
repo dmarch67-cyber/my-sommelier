@@ -35,7 +35,7 @@ const CORS = {
 const DEFAULT_OWNER_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
 // Bump when the matching changes, so the next app start re-runs the sync
 // instead of waiting a day.
-const MATCHER_VERSION = 2;
+const MATCHER_VERSION = 3;
 const DAY_MS = 20 * 60 * 60 * 1000; // "once a day", with some slack
 
 function reply(status: number, body: unknown): Response {
@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
     try {
       const response = await new Anthropic({ apiKey }).beta.messages.create({
         model: MODEL,
-        max_tokens: 32000,
+        max_tokens: 16000,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
         output_config: { effort: 'low', format: { type: 'json_schema', schema: PICK_SCHEMA } },
