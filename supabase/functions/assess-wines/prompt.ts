@@ -126,14 +126,159 @@ export function systemPrompt(year: number): string {
 
 Weigh the evidence in this order:
 1. The owner's own tasting notes, when given.
-2. Recent tasting notes from the last two years (CellarTracker community notes, WineBerserkers threads, Reddit, merchant and critic write-ups). Several recent notes agreeing that a wine is tiring, drying out or past its peak should pull the end of the window in, even if a critic's older window runs later. Several saying it is still tight or closed should push the start out.
+2. Recent tasting notes from the last two years, given below as a digest gathered from CellarTracker community notes, WineBerserkers, Reddit, merchants and critics. Several recent notes agreeing that a wine is tiring, drying out or past its peak should pull the end of the window in, even if a critic's older window runs later. Several saying it is still tight or closed should push the start out. Only vintages that are drinkable now or soon were searched.
 3. Critic windows and scores (Vinous, Wine Advocate, Burghound, Jancis Robinson and others), and the CellarTracker window. Older critic windows are a starting point, not the answer.
 4. Your own knowledge of the producer, appellation and vintage.
 
-Use web search to find recent notes. Search for the producer, cuvée and vintage; a few targeted searches per wine is plenty, and you can cover several vintages in one search. Do not invent notes: if you find little, say so in the summary, rely on the other evidence and set confidence to low.
+Do not invent notes: where the digest has little or nothing, say so in the summary, rely on the other evidence and set confidence to low.
 
-For each vintage give drink_from and drink_to as calendar years (drink_to never before drink_from), how mature it is now, your confidence, and a short summary of what recent notes say. Then call record_assessment once with every vintage listed. Keep the sources to the pages that actually informed you.`;
+For each vintage give drink_from and drink_to as calendar years (drink_to never before drink_from), how mature it is now, your confidence, a two or three sentence summary of what recent notes say, how many recent notes the digest has for it, and the year of the latest one. List every vintage. Put the pages the digest drew on in sources.`;
 }
+
+// ---------------------------------------------------------------------------
+// Step 1: a small, cheap model searches and reads, and returns a short digest
+// of dated tasting notes. Only vintages drinkable now or soon are searched.
+
+export const READER_MODEL = 'claude-haiku-5-5';
+
+/** Vintages worth searching: no window yet, or one that opens within two years. */
+export function nearReady(w: WineIn, year: number): VintageIn[] {
+  return w.vintages.filter((v) => v.drink_from == null || v.drink_from <= year + 2);
+}
+
+export const SIGNALS = [...MATURITIES, 'unclear'] as const;
+
+export const NOTES_TOOL = {
+  name: 'record_notes',
+  description: 'Record the dated tasting notes you found. Call it exactly once, after searching.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['vintages', 'sources'],
+    properties: {
+      vintages: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['vintage_id', 'notes'],
+          properties: {
+            vintage_id: { type: 'string' },
+            notes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['date', 'source', 'signal', 'gist'],
+                properties: {
+                  date: { type: 'string', description: 'YYYY-MM or YYYY of the note.' },
+                  source: {
+                    type: 'string',
+                    description: 'e.g. CellarTracker, WineBerserkers, Vinous.',
+                  },
+                  signal: { type: 'string', enum: [...SIGNALS] },
+                  gist: { type: 'string', description: 'At most 25 words, in your own words.' },
+                },
+              },
+            },
+          },
+        },
+      },
+      sources: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['url', 'title'],
+          properties: { url: { type: 'string' }, title: { type: 'string' } },
+        },
+      },
+    },
+  },
+} as const;
+
+export function readerSystem(year: number): string {
+  return `You gather recent tasting notes on wines for a cellar master. It is ${year}. Search the web for notes on the vintages listed, from the last two to three years: CellarTracker community notes, WineBerserkers threads, Reddit, merchants and critics. A few targeted searches are plenty; one search can cover several vintages. Do not search vintages that are not listed.
+
+For each vintage, record up to six of the most recent notes you actually found, each with its date, source, a maturity signal (too_young, approaching, ready, peak, declining, past_it, or unclear) and a gist of at most 25 words in your own words. Never invent a note; an empty list is fine. Then call record_notes once.`;
+}
+
+export function readerText(w: WineIn, near: VintageIn[]): string {
+  const place = [w.appellation, w.region, w.country].filter(Boolean).join(', ');
+  return [
+    `Wine: ${w.name}${w.producer ? ` (producer ${w.producer})` : ''}${place ? `, ${place}` : ''}`,
+    'Vintages to search:',
+    ...near.map((v) => `- vintage_id ${v.id}: ${v.year ?? 'NV'}`),
+  ].join('\n');
+}
+
+export type DigestNote = { date: string; source: string; signal: string; gist: string };
+export type Digest = {
+  notes: Map<string, DigestNote[]>;
+  sources: { url: string; title: string }[];
+};
+
+/** Checks the reader's answer: only the vintages searched, short notes. */
+export function cleanDigest(raw: unknown, near: VintageIn[]): Digest {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const ids = new Set(near.map((v) => v.id));
+  const notes = new Map<string, DigestNote[]>();
+  for (const item of Array.isArray(obj.vintages) ? obj.vintages : []) {
+    const r = item as Record<string, unknown>;
+    if (!r || typeof r.vintage_id !== 'string' || !ids.has(r.vintage_id)) continue;
+    const list: DigestNote[] = [];
+    for (const n of Array.isArray(r.notes) ? r.notes : []) {
+      const x = n as Record<string, unknown>;
+      if (!x || typeof x.gist !== 'string' || !x.gist.trim()) continue;
+      list.push({
+        date: String(x.date ?? '').slice(0, 10),
+        source: String(x.source ?? '').slice(0, 40),
+        signal: SIGNALS.includes(x.signal as (typeof SIGNALS)[number])
+          ? String(x.signal)
+          : 'unclear',
+        gist: x.gist.trim().slice(0, 200),
+      });
+    }
+    notes.set(r.vintage_id, [...(notes.get(r.vintage_id) ?? []), ...list].slice(0, 8));
+  }
+  const sources: { url: string; title: string }[] = [];
+  for (const s of Array.isArray(obj.sources) ? obj.sources : []) {
+    const r = s as Record<string, unknown>;
+    if (r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)) {
+      sources.push({ url: r.url.slice(0, 500), title: String(r.title ?? '').slice(0, 200) });
+    }
+  }
+  return { notes, sources: sources.slice(0, 20) };
+}
+
+/** The digest as the judge reads it, under the wine's own facts. */
+export function digestText(w: WineIn, near: VintageIn[], d: Digest | null): string {
+  const searched = new Set(near.map((v) => v.id));
+  const lines = ['', 'Recent tasting notes digest:'];
+  for (const v of w.vintages) {
+    const label = `${v.year ?? 'NV'} (vintage_id ${v.id})`;
+    if (!searched.has(v.id)) {
+      lines.push(`- ${label}: not searched (not near its window yet)`);
+      continue;
+    }
+    const notes = d?.notes.get(v.id) ?? [];
+    if (notes.length === 0) {
+      lines.push(`- ${label}: no recent notes found`);
+      continue;
+    }
+    lines.push(`- ${label}:`);
+    for (const n of notes) lines.push(`  ${n.date} ${n.source} [${n.signal}] ${n.gist}`);
+  }
+  if (d?.sources.length) {
+    lines.push('', 'Pages the digest drew on:');
+    for (const s of d.sources) lines.push(`- ${s.title} ${s.url}`);
+  }
+  return lines.join('\n');
+}
+
+/** The judge's answer schema (same fields as before, as a structured output). */
+export const ASSESSMENT_SCHEMA = RECORD_TOOL.input_schema;
 
 function scoreLine(s: ScoreIn): string {
   const who = s.source_detail?.replace(/^CellarTracker export:\s*/, '') || s.source;

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  ASSESSMENT_SCHEMA,
   cleanAssessment,
+  cleanDigest,
+  digestText,
+  nearReady,
+  NOTES_TOOL,
+  readerText,
   RECORD_TOOL,
   systemPrompt,
   userText,
@@ -126,4 +132,51 @@ test('a window may not start before the vintage', () => {
     2026,
   );
   assert.equal(clean.vintages[0].drink_from, null);
+});
+
+test('only vintages drinkable now or soon are searched', () => {
+  const near = nearReady(wine, 2026);
+  assert.deepEqual(
+    near.map((v) => v.id),
+    ['v05'],
+    '2019 opens in 2030, too far off; 2005 has no window',
+  );
+  assert.match(readerText(wine, near), /vintage_id v05: 2005/);
+  assert.doesNotMatch(readerText(wine, near), /v19/);
+  assert.equal(NOTES_TOOL.strict, true);
+  assert.equal(ASSESSMENT_SCHEMA, RECORD_TOOL.input_schema);
+});
+
+test('the digest keeps only searched vintages and real notes', () => {
+  const near = nearReady(wine, 2026);
+  const d = cleanDigest(
+    {
+      vintages: [
+        {
+          vintage_id: 'v05',
+          notes: [
+            {
+              date: '2025-06',
+              source: 'CellarTracker',
+              signal: 'declining',
+              gist: 'Fading fruit.',
+            },
+            { date: '2025', source: 'Reddit', signal: 'whatever', gist: 'Still fine.' },
+            { date: '2025', source: 'X', signal: 'ready', gist: '  ' },
+          ],
+        },
+        { vintage_id: 'v19', notes: [{ date: '2025', source: 'A', signal: 'ready', gist: 'x' }] },
+      ],
+      sources: [{ url: 'https://example.test/n', title: 'N' }, { url: 'ftp://x' }],
+    },
+    near,
+  );
+  assert.equal(d.notes.get('v05')?.length, 2);
+  assert.equal(d.notes.get('v05')?.[1].signal, 'unclear');
+  assert.equal(d.notes.has('v19'), false);
+  const text = digestText(wine, near, d);
+  assert.match(text, /2019 \(vintage_id v19\): not searched/);
+  assert.match(text, /2025-06 CellarTracker \[declining\] Fading fruit\./);
+  assert.match(text, /N https:\/\/example.test\/n/);
+  assert.match(digestText(wine, near, null), /2005 \(vintage_id v05\): no recent notes found/);
 });

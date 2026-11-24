@@ -2,8 +2,12 @@
 //
 // Each call reviews ONE wine: it claims the next wine (most bottles first),
 // gathers what the app knows (CellarTracker window, critic scores, the
-// owner's own notes), lets Claude search the web for recent tasting notes,
-// and saves one blended window per vintage through apply_assessment().
+// owner's own notes), and then works in two steps to keep cost down:
+//   1. Claude Haiku searches the web for recent tasting notes on the vintages
+//      that are drinkable now or soon, and returns a short dated digest.
+//   2. Claude Opus reads that digest with the critic and CellarTracker
+//      windows and sets one blended window per vintage.
+// The result is saved through apply_assessment().
 //
 // It is called by a database schedule (pg_cron + pg_net), not by the app, so
 // reviews carry on with the app closed. The schedule sends the shared secret
@@ -15,11 +19,20 @@ import Anthropic from 'npm:@anthropic-ai/sdk@1.13.0';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
 
 import {
+  ASSESSMENT_SCHEMA,
   cleanAssessment,
+  cleanDigest,
+  type Digest,
+  digestText,
   MODEL,
-  RECORD_TOOL,
+  nearReady,
+  NOTES_TOOL,
+  READER_MODEL,
+  readerSystem,
+  readerText,
   systemPrompt,
   userText,
+  type VintageIn,
   type WineIn,
 } from './prompt.ts';
 
@@ -33,7 +46,14 @@ function reply(status: number, body: unknown): Response {
   });
 }
 
-type Usage = { input: number; output: number; searches: number };
+type Usage = {
+  pipeline: number;
+  reader_input: number;
+  reader_output: number;
+  searches: number;
+  judge_input: number;
+  judge_output: number;
+};
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply(405, { error: 'Use POST.' });
@@ -66,7 +86,14 @@ Deno.serve(async (req) => {
   if (claimError) return reply(500, { error: claimError.message });
   if (!assessmentId) return reply(200, { done: true });
 
-  const usage: Usage = { input: 0, output: 0, searches: 0 };
+  const usage: Usage = {
+    pipeline: 2,
+    reader_input: 0,
+    reader_output: 0,
+    searches: 0,
+    judge_input: 0,
+    judge_output: 0,
+  };
   const fail = async (msg: string) => {
     await db.rpc('fail_assessment', {
       p_assessment_id: assessmentId,
@@ -82,53 +109,42 @@ Deno.serve(async (req) => {
 
     const year = new Date().getFullYear();
     const client = new Anthropic({ apiKey });
-    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: userText(wine) }];
-    let recorded: unknown = null;
-    let nudged = false;
-    for (let round = 0; round < MAX_ROUNDS && !recorded; round++) {
-      const message = await client.beta.messages
-        .stream({
-          model: MODEL,
-          max_tokens: 32000,
-          betas: ['server-side-fallback-2026-07-01'],
-          fallbacks: 'default',
-          output_config: { effort: 'medium' },
-          system: systemPrompt(year),
-          tools: [
-            { type: 'web_search_20260209', name: 'web_search', max_uses: 5 },
-            RECORD_TOOL as unknown as Anthropic.Beta.BetaTool,
-          ],
-          tool_choice: { type: 'auto' },
-          messages,
-        })
-        .finalMessage();
-      usage.input += message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0);
-      usage.output += message.usage.output_tokens;
-      usage.searches += message.usage.server_tool_use?.web_search_requests ?? 0;
 
-      const call = message.content.find(
-        (b) => b.type === 'tool_use' && b.name === RECORD_TOOL.name,
-      );
-      if (call && call.type === 'tool_use') {
-        recorded = call.input;
-        break;
-      }
-      if (message.stop_reason === 'pause_turn') {
-        messages.push({ role: 'assistant', content: message.content });
-        continue;
-      }
-      if (message.stop_reason === 'end_turn' && !nudged) {
-        nudged = true;
-        messages.push({ role: 'assistant', content: message.content });
-        messages.push({
-          role: 'user',
-          content: 'Please call record_assessment now with every vintage listed.',
-        });
-        continue;
-      }
-      return await fail(`stopped: ${message.stop_reason}`);
+    // Step 1: the small model searches and reads, only for vintages that are
+    // drinkable now or soon, and hands back a short digest of dated notes.
+    const near = nearReady(wine, year);
+    let digest: Digest | null = null;
+    if (near.length > 0) {
+      const raw = await readNotes(client, wine, near, year, usage);
+      if (raw === undefined) return await fail('reader gave no notes');
+      digest = cleanDigest(raw, near);
     }
-    if (!recorded) return await fail('no assessment recorded');
+
+    // Step 2: the top model reads the digest with the critic and CellarTracker
+    // windows and sets one window per vintage. No searching, so it stays cheap.
+    const judged = await client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: {
+        effort: 'low',
+        format: { type: 'json_schema', schema: ASSESSMENT_SCHEMA },
+      },
+      system: systemPrompt(year),
+      messages: [{ role: 'user', content: userText(wine) + '\n' + digestText(wine, near, digest) }],
+    });
+    usage.judge_input += judged.usage.input_tokens;
+    usage.judge_output += judged.usage.output_tokens;
+    const textBlock = judged.content.find((b) => b.type === 'text');
+    if (judged.stop_reason !== 'end_turn' || !textBlock || textBlock.type !== 'text') {
+      return await fail(`judge stopped: ${judged.stop_reason}`);
+    }
+    const recorded = JSON.parse(textBlock.text);
+    if (digest) {
+      // The judge cites what it was given; keep the reader's pages too.
+      recorded.sources = [...digest.sources, ...(recorded.sources ?? [])];
+    }
 
     const clean = cleanAssessment(recorded, wine, year);
     const { data: applied, error: applyError } = await db.rpc('apply_assessment', {
@@ -194,4 +210,51 @@ async function loadWine(db: any, assessmentId: string): Promise<WineIn | null> {
     // deno-lint-ignore no-explicit-any
     vintages: vintages.filter((v: any) => v.bottles > 0),
   };
+}
+
+/** Step 1: Haiku searches and returns the raw record_notes input, or undefined. */
+async function readNotes(
+  client: Anthropic,
+  wine: WineIn,
+  near: VintageIn[],
+  year: number,
+  usage: Usage,
+): Promise<unknown> {
+  const messages: Anthropic.Beta.BetaMessageParam[] = [
+    { role: 'user', content: readerText(wine, near) },
+  ];
+  let nudged = false;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const message = await client.beta.messages
+      .stream({
+        model: READER_MODEL,
+        max_tokens: 16000,
+        output_config: { effort: 'low' },
+        system: readerSystem(year),
+        tools: [
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 4 },
+          NOTES_TOOL as unknown as Anthropic.Beta.BetaTool,
+        ],
+        tool_choice: { type: 'auto' },
+        messages,
+      })
+      .finalMessage();
+    usage.reader_input += message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0);
+    usage.reader_output += message.usage.output_tokens;
+    usage.searches += message.usage.server_tool_use?.web_search_requests ?? 0;
+    const call = message.content.find((b) => b.type === 'tool_use' && b.name === NOTES_TOOL.name);
+    if (call && call.type === 'tool_use') return call.input;
+    if (message.stop_reason === 'pause_turn') {
+      messages.push({ role: 'assistant', content: message.content });
+      continue;
+    }
+    if (message.stop_reason === 'end_turn' && !nudged) {
+      nudged = true;
+      messages.push({ role: 'assistant', content: message.content });
+      messages.push({ role: 'user', content: 'Please call record_notes now.' });
+      continue;
+    }
+    return undefined;
+  }
+  return undefined;
 }
