@@ -76,6 +76,8 @@ export type AddLine = {
   bottle_size_ml: number;
   quantity: number;
   unit_price?: number | null;
+  /** Only when the price isn't in the cellar's currency (an invoice in euros for an LA cellar). */
+  currency?: string | null;
   merchant?: string | null;
   score_raw?: string | null;
   score_low?: number | null;

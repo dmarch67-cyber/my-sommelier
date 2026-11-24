@@ -13,7 +13,8 @@ export type IconName =
   | 'close'
   | 'chevron'
   | 'camera'
-  | 'image';
+  | 'image'
+  | 'mail';
 
 /** A small hand-drawn icon set (line icons, 24px grid). */
 export function Icon({
@@ -89,6 +90,12 @@ export function Icon({
           <Path d="M5 5h14v14H5z" {...p} />
           <Circle cx={9.5} cy={9.5} r={1.5} {...p} />
           <Path d="M5 16l4.5-4.5L14 16l2-2 3 3" {...p} />
+        </>
+      )}
+      {name === 'mail' && (
+        <>
+          <Path d="M4 6.5h16v11H4z" {...p} />
+          <Path d="M4.5 7l7.5 6 7.5-6" {...p} />
         </>
       )}
       {name === 'close' && <Path d="M6.5 6.5l11 11M17.5 6.5l-11 11" {...p} />}

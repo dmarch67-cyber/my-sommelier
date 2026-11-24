@@ -6,24 +6,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SwitchRow } from '../../components/controls';
 import { Icon } from '../../components/Icon';
+import { ReviewList } from '../../components/ReviewList';
 import { useToast } from '../../components/Toast';
 import { Button, Chip, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
 import { useLastCellar } from '../../data/lastCellar';
-import { addBottles, undoEvents, type AddLine } from '../../data/writes';
-import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
+import { addBottles, undoEvents } from '../../data/writes';
+import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 import { readXlsx } from '../../lib/xlsx';
-import { exactWine, findWines } from '../../logic/adding';
 import { ALL_CELLARS, formatPrice, plural } from '../../logic/cellar';
 import { parseCsv, parseDelivery, type DeliveryParse } from '../../logic/delivery';
+import { fromDelivery, reviewTotals, toAddLines, type ReviewLine } from '../../logic/review';
 
-type Line = DeliveryParse['lines'][number] & {
-  include: boolean;
-  /** Existing wine this line adds to; null = new wine. */
-  match: { wineId: string; name: string } | null;
-  /** A close name Dan can tap to use instead of creating a new wine. */
-  suggestion: { wineId: string; name: string } | null;
-};
+type Line = ReviewLine;
 
 async function readFile(asset: DocumentPicker.DocumentPickerAsset): Promise<Uint8Array> {
   if (asset.file) return new Uint8Array(await asset.file.arrayBuffer());
@@ -84,32 +79,14 @@ export default function UploadScreen() {
       const p = parseDelivery(rows);
       setFileName(asset.name);
       setParse(p);
-      setLines(
-        p.lines.map((l) => {
-          const exact = exactWine(data.inventory, l.wineName);
-          const near = exact ? null : findWines(data.inventory, l.wineName, 1)[0];
-          return {
-            ...l,
-            include: true,
-            match: exact ? { wineId: exact.wine_id, name: exact.wine_name } : null,
-            suggestion: near ? { wineId: near.wineId, name: near.name } : null,
-          };
-        }),
-      );
+      setLines(fromDelivery(data.inventory, p.lines));
     } catch (e) {
       setProblem(`Couldn’t read that file: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
-  const chosen = lines.filter((l) => l.include);
-  const totals = useMemo(
-    () => ({
-      bottles: chosen.reduce((n, l) => n + l.quantity, 0),
-      newWines: new Set(chosen.filter((l) => !l.match).map((l) => l.wineName.toLowerCase())).size,
-      cost: chosen.reduce((n, l) => n + (l.unitPrice ?? 0) * l.quantity, 0),
-    }),
-    [chosen],
-  );
+  const totals = useMemo(() => reviewTotals(lines), [lines]);
+  const chosen = totals.chosen;
 
   const update = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -119,21 +96,7 @@ export default function UploadScreen() {
     setBusy(true);
     setProblem(null);
     try {
-      // New wines are matched by name in the database too, so the same new
-      // wine on two lines (two vintages or sizes) becomes one wine.
-      const payload: AddLine[] = chosen.map((l) => ({
-        ...(l.match
-          ? { wine_id: l.match.wineId }
-          : { wine_name: l.wineName, region: l.region, country: l.country }),
-        vintage: l.vintage,
-        quantity: l.quantity,
-        bottle_size_ml: l.sizeMl,
-        unit_price: l.unitPrice,
-        score_raw: l.score?.raw ?? null,
-        score_low: l.score?.low ?? null,
-        score_high: l.score?.high ?? null,
-        score_plus: l.score?.plus ?? false,
-      }));
+      const payload = toAddLines(lines, cellar.currency);
       const res = await addBottles(
         cellar.id,
         payload,
@@ -273,65 +236,7 @@ export default function UploadScreen() {
               onChange={setOnOrder}
             />
 
-            <View style={styles.list}>
-              {lines.map((l, i) => (
-                <View key={l.row} style={[styles.line, !l.include && { opacity: 0.45 }]}>
-                  <Pressable
-                    onPress={() => update(i, { include: !l.include })}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: l.include }}
-                    hitSlop={8}
-                    style={[styles.check, l.include && styles.checkOn]}
-                  >
-                    {l.include ? <T style={styles.checkMark}>✓</T> : null}
-                  </Pressable>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <T variant="bodyStrong">
-                      {l.match?.name ?? l.wineName} {l.vintage ?? 'NV'}
-                    </T>
-                    <T variant="caption">
-                      {[
-                        `${l.quantity} × ${l.sizeMl === 750 ? 'bottle' : l.sizeMl === 1500 ? 'magnum' : `${l.sizeMl} ml`}`,
-                        l.unitPrice != null && cellar
-                          ? `${formatPrice(l.unitPrice, cellar.currency)} each`
-                          : null,
-                        l.score ? `score ${l.score.raw}` : null,
-                        `row ${l.row}`,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </T>
-                    {l.match ? (
-                      <View style={styles.tagRow}>
-                        <T variant="caption" style={styles.tagIn}>
-                          In your cellar
-                        </T>
-                        {l.match.name !== l.wineName && (
-                          <Pressable onPress={() => update(i, { match: null })} hitSlop={6}>
-                            <T variant="caption" style={{ color: colors.accent }}>
-                              Not this wine
-                            </T>
-                          </Pressable>
-                        )}
-                      </View>
-                    ) : (
-                      <View style={styles.tagRow}>
-                        <T variant="caption" style={styles.tagNew}>
-                          New wine
-                        </T>
-                        {l.suggestion && (
-                          <Pressable onPress={() => update(i, { match: l.suggestion })} hitSlop={6}>
-                            <T variant="caption" style={{ color: colors.accent }}>
-                              Same as “{l.suggestion.name}”?
-                            </T>
-                          </Pressable>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))}
-            </View>
+            <ReviewList lines={lines} currency={cellar?.currency ?? null} onChange={update} />
 
             {parse.skipped.length > 0 && (
               <View style={styles.box}>
@@ -386,33 +291,4 @@ const styles = StyleSheet.create({
     padding: space.lg,
   },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  list: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md },
-  line: {
-    flexDirection: 'row',
-    gap: space.md,
-    padding: space.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  check: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.textFaint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  checkOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  checkMark: { color: colors.onAccent, fontFamily: fonts.bold, fontSize: 14, lineHeight: 16 },
-  tagRow: { flexDirection: 'row', gap: space.md, alignItems: 'center', marginTop: 2 },
-  tagIn: { color: colors.textMuted },
-  tagNew: {
-    color: colors.accent,
-    backgroundColor: colors.accentSoft,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.sm,
-    overflow: 'hidden',
-  },
 });
