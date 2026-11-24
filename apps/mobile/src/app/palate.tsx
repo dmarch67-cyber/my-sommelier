@@ -7,7 +7,6 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { Button, T } from '../components/ui';
 import { useCellarData } from '../data/CellarData';
-import { plural } from '../logic/cellar';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../lib/theme';
 
 /**
@@ -50,9 +49,8 @@ export default function PalateScreen() {
   };
 
   const basis = [
-    `${p.bottlesBought.toLocaleString()} bottles you’ve bought`,
-    `${p.bottlesDrunk.toLocaleString()} you’ve drunk`,
-    p.ownNotes > 0 ? plural(p.ownNotes, 'of your own ratings', 'of your own ratings') : null,
+    `${p.bottlesBought.toLocaleString()} bottles in your records (newer vintages count most)`,
+    p.ownNotes > 0 ? `${p.ownNotes} of your own ratings (recent ones count most)` : null,
     p.quizDone ? 'your quiz' : null,
   ].filter(Boolean) as string[];
 
@@ -69,7 +67,11 @@ export default function PalateScreen() {
         <View style={styles.hero}>
           <T variant="heading">{p.headline}</T>
           {p.quizLine ? <T variant="body">{p.quizLine}</T> : null}
-          <T variant="caption">Based on {basis.join(', ').replace(/, ([^,]*)$/, ' and $1')}.</T>
+          <T variant="caption">
+            Based on {basis.join(', ').replace(/, ([^,]*)$/, ' and $1')}. Your cellar shows only
+            part of 20 years of drinking, and taste changes, so your quiz answers and thumbs count
+            for more than the cellar.
+          </T>
         </View>
 
         {p.quizDone ? (

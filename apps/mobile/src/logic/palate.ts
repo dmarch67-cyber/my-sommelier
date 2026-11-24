@@ -1,7 +1,11 @@
 // The owner's palate profile, worked out from what is already in the app:
-//  1. What they buy and, above all, what they drink (bottles drunk count most).
-//  2. Their own scores, thumbs up/down and notes (including old CellarTracker ones).
-//  3. A short taste quiz, which fills in what the cellar can't say.
+//  1. What they have bought, newer vintages counting most (a stand-in for
+//     recent buying: the cellar holds only part of 20 years of drinking, and
+//     taste changes). How fast bottles get drunk is NOT used: older bottles
+//     get opened first simply because they have been held longest.
+//  2. Their own thumbs up/down, scores and notes, recent ones counting most
+//     (old CellarTracker scores count a little).
+//  3. A short taste quiz. Once taken, the quiz and thumbs outweigh the cellar.
 // Lines they say "not really" to are left out. Plain TypeScript, no React,
 // so it is easy to test.
 
@@ -229,8 +233,10 @@ export type PalateProfile = {
   notReally: Set<string>;
   grapes: Affinity[];
   places: Affinity[];
-  /** Producers they open fastest (most of what they buy gets drunk). */
+  /** Producers they have bought most of lately (newer vintages count most). */
   favourites: Affinity[];
+  /** Wines they gave a thumbs up or a high score (recently): their wine ids. */
+  lovedIds: Set<string>;
   /** Wines they rated highly or gave a thumbs up. */
   loved: string[];
   /** Wines they gave a thumbs down or a low score: their wine ids. */
@@ -250,6 +256,7 @@ export type VintageDrinking = { vintage_id: string; bought: number; drunk: numbe
 export type PalateNote = Pick<TastingNote, 'vintage_id' | 'rating'> & {
   liked?: boolean | null;
   notes?: string | null;
+  tasted_on?: string | null;
 };
 
 type WineFacts = {
@@ -263,7 +270,9 @@ type WineFacts = {
   grapes: string[];
   bought: number;
   drunk: number;
-  /** Own opinion: + loved, - not for them. */
+  /** Bottles bought, weighted by how recent the vintage is. */
+  recent: number;
+  /** Own opinion: + loved, - not for them (recent notes count most). */
   opinion: number;
 };
 
@@ -308,7 +317,23 @@ export function buildProfile(input: {
   notes: PalateNote[];
   quiz?: QuizAnswers | null;
   notReally?: string[] | null;
+  /** This year; defaults to now. */
+  year?: number;
 }): PalateProfile {
+  const year = input.year ?? new Date().getFullYear();
+  // Newer vintages stand in for recent buying: full weight for the last 6
+  // years, then halving every 8 years.
+  const vintageWeight = (v: number | null) => {
+    if (v == null) return 0.5;
+    const age = year - v;
+    return age <= 6 ? 1 : Math.max(0.5 ** ((age - 6) / 8), 0.1);
+  };
+  // Notes: halve every 4 years; an old score with no date counts a little.
+  const noteWeight = (d: string | null | undefined) => {
+    if (!d) return 0.3;
+    const age = Math.max(0, year - Number(d.slice(0, 4)));
+    return 0.5 ** (age / 4);
+  };
   const quiz = input.quiz ?? {};
   const notReally = new Set(input.notReally ?? []);
   const drinking = new Map(input.drinking.map((d) => [d.vintage_id, d]));
@@ -330,6 +355,7 @@ export function buildProfile(input: {
       grapes: r.grapes ?? [],
       bought: 0,
       drunk: 0,
+      recent: 0,
       opinion: 0,
     };
     wines.set(r.wine_id, w);
@@ -339,13 +365,16 @@ export function buildProfile(input: {
     if (d) {
       w.bought += d.bought;
       w.drunk += d.drunk;
+      w.recent += d.bought * vintageWeight(r.vintage);
     }
   }
   // Fall back to the holdings when the drinking counts are missing.
   if (input.drinking.length === 0) {
     for (const r of input.rows) {
       const w = wines.get(r.wine_id);
-      if (w) w.bought += r.quantity + r.quantity_on_order;
+      if (!w) continue;
+      w.bought += r.quantity + r.quantity_on_order;
+      w.recent += (r.quantity + r.quantity_on_order) * vintageWeight(r.vintage);
     }
   }
 
@@ -355,11 +384,11 @@ export function buildProfile(input: {
     if (!w) continue;
     const s = noteSignal(n);
     if (s !== 0 || n.liked != null || n.rating != null) ownNotes++;
-    w.opinion += s;
+    w.opinion += s * noteWeight(n.tasted_on);
   }
 
-  // Drinking a bottle says the most; buying says something; own opinions on top.
-  const signal = (w: WineFacts) => w.drunk + 0.3 * (w.bought - w.drunk) + 4 * w.opinion;
+  // Recent buying, with their own opinions on top.
+  const signal = (w: WineFacts) => w.recent + 4 * w.opinion;
 
   const tally = (keyOf: (w: WineFacts) => { key: string; label: string }[]): Affinity[] => {
     const sums = new Map<string, Affinity & { raw: number }>();
@@ -388,22 +417,18 @@ export function buildProfile(input: {
     w.producer ? [{ key: `producer:${w.producer}`, label: w.producer }] : [],
   );
 
-  // Favourites: producers they buy a fair amount of and drink fastest.
-  const favourites = producers
-    .filter((p) => p.bought >= 6 && p.drunk >= 6)
-    .map((p) => ({ p, rate: (p.drunk / p.bought) * Math.log(1 + p.drunk) }))
-    .sort((a, b) => b.rate - a.rate)
-    .map((x) => x.p)
-    .slice(0, 5);
+  // Favourite producers: the ones they have bought most of lately.
+  const favourites = producers.filter((p) => p.bought >= 6).slice(0, 5);
 
   const all = [...wines.values()];
   const loved = all
-    .filter((w) => w.opinion >= 3)
+    .filter((w) => w.opinion >= 1)
     .sort((a, b) => b.opinion - a.opinion)
     .map((w) => w.name)
     .slice(0, 6);
   const disliked = all.filter((w) => w.opinion < 0 && !notReally.has(`dislike:${w.wineId}`));
   const notForMe = new Set(disliked.map((w) => w.wineId));
+  const lovedIds = new Set(all.filter((w) => w.opinion >= 1).map((w) => w.wineId));
 
   // Style: the colour and body of most bottles.
   const bottlesBought = all.reduce((s, w) => s + w.bought, 0);
@@ -412,10 +437,11 @@ export function buildProfile(input: {
     const m = new Map<string, number>();
     for (const w of all) {
       const k = pick(w);
-      if (k) m.set(k, (m.get(k) ?? 0) + w.bought);
+      if (k) m.set(k, (m.get(k) ?? 0) + w.recent);
     }
+    const total = all.reduce((t, w) => t + w.recent, 0);
     const top = [...m].sort((a, b) => b[1] - a[1])[0];
-    return top && bottlesBought > 0 ? { key: top[0], share: top[1] / bottlesBought } : null;
+    return top && total > 0 ? { key: top[0], share: top[1] / total } : null;
   };
   const topColour = share((w) => w.colour);
   const topBody = share((w) => w.body);
@@ -437,14 +463,11 @@ export function buildProfile(input: {
       text: `Mostly ${styleText} (${Math.round(style.share * 100)}% of your bottles)`,
     });
   }
-  for (const g of grapes.slice(0, 4)) lines.push({ key: g.key, text: `You love ${g.label}` });
+  for (const g of grapes.slice(0, 4)) lines.push({ key: g.key, text: `You like ${g.label}` });
   for (const p of places.slice(0, 4))
-    lines.push({ key: p.key, text: `You love wines from ${p.label}` });
-  for (const f of favourites.slice(0, 4)) {
-    lines.push({
-      key: f.key,
-      text: `You open ${f.label} fast (${f.drunk} of ${f.bought} bottles drunk)`,
-    });
+    lines.push({ key: p.key, text: `You like wines from ${p.label}` });
+  for (const f of favourites.slice(0, 3)) {
+    lines.push({ key: f.key, text: `${f.label} is a favourite producer` });
   }
   for (const w of disliked.slice(0, 3)) {
     lines.push({ key: `dislike:${w.wineId}`, text: `${w.name} isn't for you` });
@@ -455,15 +478,13 @@ export function buildProfile(input: {
   const topGrapes = grapes.slice(0, 2).map((g) => g.label);
   const topPlaces = places.slice(0, 3).map((p) => p.label);
   if (styleText || topGrapes.length) {
-    let s = `You lean to ${styleText ?? 'wines'}`;
+    let s = `Lately you lean to ${styleText ?? 'wines'}`;
     if (topGrapes.length) s += `, above all ${list(topGrapes)}`;
     if (topPlaces.length) s += ` from ${list(topPlaces)}`;
     parts.push(`${s}.`);
   }
   if (favourites.length) {
-    parts.push(
-      `The bottles you open fastest are ${list(favourites.slice(0, 3).map((f) => f.label))}.`,
-    );
+    parts.push(`Favourite producers: ${list(favourites.slice(0, 3).map((f) => f.label))}.`);
   }
   const headline = parts.join(' ') || 'Not enough to go on yet. Take the quiz to get started.';
 
@@ -483,6 +504,7 @@ export function buildProfile(input: {
     grapes,
     places,
     favourites,
+    lovedIds,
     loved,
     notForMe,
     notForMeNames: disliked.map((w) => w.name).slice(0, 6),
@@ -549,16 +571,20 @@ export function palateFit(i: CellarItem, p: PalateProfile): PalateFit {
   const favourite = i.producer
     ? p.favourites.find((f) => f.key === `producer:${i.producer}`)
     : undefined;
-  const producer = favourite ? 1 : 0;
+  const producer = i.producer ? aff(p.favourites, `producer:${i.producer}`) : 0;
   const styleOk =
     (!p.style.colour || p.style.colour === i.colour ? 0.5 : 0) +
     (!p.style.body || p.style.body === i.body ? 0.5 : 0);
   const history = 0.4 * grape + 0.3 * place + 0.2 * producer + 0.1 * styleOk;
   const q = p.quizDone ? quizFit(i, p.quiz) : null;
-  const fit = q == null ? history : 0.55 * history + 0.45 * q;
+  // The cellar is only part of the story: once the quiz is taken it counts most.
+  let fit = q == null ? history : 0.35 * history + 0.65 * q;
+  const loved = p.lovedIds.has(i.wineId);
+  if (loved) fit += 0.25;
 
   let why: string | null = null;
-  if (favourite) why = `You open ${favourite.label} often`;
+  if (loved) why = 'You liked it last time';
+  else if (favourite) why = `${favourite.label} is a favourite`;
   else if (fit >= 0.7) why = 'Right up your street';
   return { fit: Math.min(Math.max(fit, 0), 1), notForMe: false, why };
 }
@@ -584,6 +610,7 @@ export function ageNudge(p: PalateProfile, state: ReadyState): number {
 /** The profile in a few plain sentences, for the sommelier (Claude). */
 export function palateText(p: PalateProfile): string {
   const out: string[] = [];
+  out.push('Based on a partial cellar record; their quiz and thumbs matter most.');
   if (p.style.colour) {
     out.push(
       `Mostly ${p.style.body ? `${p.style.body}-bodied ` : ''}${COLOUR_WORD[p.style.colour] ?? p.style.colour}.`,
@@ -604,7 +631,7 @@ export function palateText(p: PalateProfile): string {
         .join('; ')}.`,
     );
   if (p.favourites.length)
-    out.push(`Opens these producers fastest: ${p.favourites.map((f) => f.label).join('; ')}.`);
+    out.push(`Favourite producers lately: ${p.favourites.map((f) => f.label).join('; ')}.`);
   if (p.loved.length) out.push(`Loved: ${p.loved.slice(0, 4).join('; ')}.`);
   if (p.notForMeNames.length) out.push(`Not for them: ${p.notForMeNames.slice(0, 3).join('; ')}.`);
   const quiz = (Object.keys(p.quiz) as QuizKey[])
