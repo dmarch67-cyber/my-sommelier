@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Stars } from '../../components/controls';
@@ -136,6 +136,8 @@ export default function WinePage() {
         .sort((a, b) => (a.vintage ?? 0) - (b.vintage ?? 0)),
     };
   }, [data, id, year]);
+
+  const critics = data.critics.get(id);
 
   const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -420,7 +422,25 @@ export default function WinePage() {
         )}
 
         <Section title="What critics and drinkers say">
-          <Placeholder text="A two- or three-sentence summary of recent critic and community notes will appear here, with a link to the full notes." />
+          {critics ? (
+            <Card style={{ gap: space.md }}>
+              <T variant="body">{critics.text}</T>
+              {critics.url ? (
+                <Pressable
+                  onPress={() => Linking.openURL(critics.url as string)}
+                  accessibilityRole="link"
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.notesLink, pressed && { opacity: 0.6 }]}
+                >
+                  <T variant="bodyStrong" style={{ color: colors.accent }}>
+                    Read the full notes on CellarTracker
+                  </T>
+                </Pressable>
+              ) : null}
+            </Card>
+          ) : (
+            <Placeholder text="No summary yet. One will appear after this wine's next review." />
+          )}
         </Section>
 
         <Section title="Food matches">
@@ -514,6 +534,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scoreText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.accent },
+  notesLink: { alignSelf: 'flex-start' },
   accolade: {
     backgroundColor: colors.accentSoft,
     borderRadius: radius.md,
