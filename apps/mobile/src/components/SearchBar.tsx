@@ -11,12 +11,15 @@ export function SearchBar({
   value,
   onChange,
   placeholder,
+  onSubmit,
 }: {
   value: string;
   onChange: (text: string) => void;
   placeholder: string;
+  /** Enter pressed, or the person finished speaking. */
+  onSubmit?: (text: string) => void;
 }) {
-  const voice = useVoiceInput(onChange);
+  const voice = useVoiceInput(onChange, onSubmit);
 
   useEffect(() => {
     if (!voice.message) return;
@@ -39,6 +42,7 @@ export function SearchBar({
           autoCorrect={false}
           autoCapitalize="none"
           returnKeyType="search"
+          onSubmitEditing={() => onSubmit?.(value)}
           clearButtonMode="while-editing"
           accessibilityLabel="Search the cellar"
         />
