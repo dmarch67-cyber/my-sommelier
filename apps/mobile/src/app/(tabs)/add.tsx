@@ -1,12 +1,23 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '../../components/Icon';
 import { T } from '../../components/ui';
+import { listInvoices } from '../../data/invoices';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 
 export default function AddScreen() {
+  // Invoices that arrived by email and are waiting to be checked.
+  const [waiting, setWaiting] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      listInvoices()
+        .then((list) => setWaiting(list.filter((i) => i.status === 'ready').length))
+        .catch(() => undefined);
+    }, []),
+  );
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -31,6 +42,12 @@ export default function AddScreen() {
           title="Upload a delivery spreadsheet"
           text="Excel or CSV from a merchant. You check the list before anything is added. It only adds, never replaces."
           onPress={() => router.push('/add/upload')}
+        />
+        <Option
+          icon="mail"
+          title={waiting > 0 ? `Email an invoice · ${waiting} to check` : 'Email an invoice'}
+          text="Forward a merchant’s invoice to your private address. You check the bottles and pick the cellar before anything is added."
+          onPress={() => router.push('/add/invoices')}
         />
       </ScrollView>
     </SafeAreaView>
