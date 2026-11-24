@@ -35,7 +35,7 @@ const CORS = {
 const DEFAULT_OWNER_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
 // Bump when the matching changes, so the next app start re-runs the sync
 // instead of waiting a day.
-const MATCHER_VERSION = 3;
+const MATCHER_VERSION = 4;
 const DAY_MS = 20 * 60 * 60 * 1000; // "once a day", with some slack
 
 function reply(status: number, body: unknown): Response {
@@ -213,6 +213,11 @@ Deno.serve(async (req) => {
       claudeNote = String(e).slice(0, 200);
     }
   }
+  // 5. Places (country, region, sub-region, appellation) from CellarTracker,
+  // which is exact, replace the spreadsheet's for every matched wine.
+  const { data: placesApplied, error: placeError } = await db.rpc('apply_ct_places', {
+    p_matches: matches.map((m) => ({ vintage_id: m.vintage_id, ...m.place })),
+  });
   const matchedIds = new Set(matches.map((m) => m.vintage_id));
   const usedCt = new Set(matches.map((m) => m.ct_id));
   const unmatchedApp = vintages.length - matchedIds.size;
@@ -235,6 +240,7 @@ Deno.serve(async (req) => {
       .map((v) => `${v.wine_name} ${v.year ?? 'NV'}`),
     ct_sample: rows.slice(0, 25).map((r) => `${r.Wine} ${r.Vintage}`),
     applied,
+    places: placeError ? `failed: ${placeError.message}` : placesApplied,
   };
   await log(true, summary);
   return reply(200, summary);

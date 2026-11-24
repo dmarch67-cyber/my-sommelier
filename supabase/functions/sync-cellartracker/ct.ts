@@ -171,7 +171,31 @@ export type CtMatch = {
   drink_from: number | null;
   drink_to: number | null;
   scores: CtScore[];
+  /** Where CellarTracker says the wine is from; blanks and "Unknown" left out. */
+  place: CtPlace;
 };
+
+export type CtPlace = {
+  country: string | null;
+  region: string | null;
+  sub_region: string | null;
+  appellation: string | null;
+};
+
+function placePart(v: string | undefined): string | null {
+  const t = (v ?? '').trim();
+  return t && !/^(unknown|n\/a|-)$/i.test(t) ? t : null;
+}
+
+/** Country > Region > Sub-region > Appellation from an export row. */
+export function ctPlace(row: Record<string, string>): CtPlace {
+  return {
+    country: placePart(row.Country),
+    region: placePart(row.Region),
+    sub_region: placePart(row.SubRegion),
+    appellation: placePart(row.Appellation),
+  };
+}
 
 /**
  * How well a CellarTracker name fits an app name, 0..1. Every word of the
@@ -211,6 +235,7 @@ export function rowFacts(row: Record<string, string>): Omit<CtMatch, 'vintage_id
     drink_from: from != null && to != null && to >= from ? from : null,
     drink_to: from != null && to != null && to >= from ? to : null,
     scores,
+    place: ctPlace(row),
   };
 }
 
