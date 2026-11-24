@@ -24,6 +24,7 @@ import {
   parseCsv,
   rowFacts,
   type AppVintage,
+  type CtMatch,
 } from './ct.ts';
 
 const CORS = {
@@ -166,8 +167,25 @@ Deno.serve(async (req) => {
     return reply(500, { error: 'Could not save the CellarTracker facts.' });
   }
 
+  // Places (country, region, sub-region, appellation) from CellarTracker are
+  // exact, so they replace the spreadsheet's for every matched wine.
+  const placesFor = (list: CtMatch[]) =>
+    db.rpc('apply_ct_places', {
+      p_matches: list.map((m) => ({ vintage_id: m.vintage_id, ...m.place })),
+    });
+  const placeRes = await placesFor(matches);
+  const placesApplied: unknown[] = [
+    placeRes.error ? `failed: ${placeRes.error.message}` : placeRes.data,
+  ];
+
   // Logged now, so a timeout in the second pass doesn't make every app start retry.
-  await log(true, { version: MATCHER_VERSION, pass: 1, matched: matches.length, applied });
+  await log(true, {
+    version: MATCHER_VERSION,
+    pass: 1,
+    matched: matches.length,
+    applied,
+    places: placesApplied,
+  });
 
   // 4. Second pass: Claude matches the names the word comparison could not.
   // A failure here keeps the first pass's matches.
@@ -206,6 +224,8 @@ Deno.serve(async (req) => {
             claudeApplied = data;
             claudeMatched = extra.length;
             matches.push(...extra);
+            const more = await placesFor(extra);
+            placesApplied.push(more.error ? `failed: ${more.error.message}` : more.data);
           }
         }
       } else claudeNote = `stopped: ${response.stop_reason}`;
@@ -213,11 +233,6 @@ Deno.serve(async (req) => {
       claudeNote = String(e).slice(0, 200);
     }
   }
-  // 5. Places (country, region, sub-region, appellation) from CellarTracker,
-  // which is exact, replace the spreadsheet's for every matched wine.
-  const { data: placesApplied, error: placeError } = await db.rpc('apply_ct_places', {
-    p_matches: matches.map((m) => ({ vintage_id: m.vintage_id, ...m.place })),
-  });
   const matchedIds = new Set(matches.map((m) => m.vintage_id));
   const usedCt = new Set(matches.map((m) => m.ct_id));
   const unmatchedApp = vintages.length - matchedIds.size;
@@ -240,7 +255,7 @@ Deno.serve(async (req) => {
       .map((v) => `${v.wine_name} ${v.year ?? 'NV'}`),
     ct_sample: rows.slice(0, 25).map((r) => `${r.Wine} ${r.Vintage}`),
     applied,
-    places: placeError ? `failed: ${placeError.message}` : placesApplied,
+    places: placesApplied,
   };
   await log(true, summary);
   return reply(200, summary);
