@@ -281,7 +281,10 @@ const STOP = new Set(
   my nice now of on open or pair pairs pairing please ready serve serving should some something
   that the to tonight wine wines want we what which will with would you your grilled roast roasted
   braised baked seared cooking cook dish dishes food friends guests night evening weekend
-  special occasion glass little bit not too very really quite tonights`.split(/\s+/),
+  special occasion glass little bit not too very really quite tonights well nicely perfect
+  perfectly match matches matching suggest suggestion recommend recommendation recommendations
+  pick choose need looking look find one two couple great lovely tasty also maybe idea ideas
+  there this these those them our us its than then just`.split(/\s+/),
 );
 
 function tokens(text: string): string[] {
@@ -417,6 +420,8 @@ export type TonightResult = {
   foodIgnored: boolean;
   /** Words the ask named that are not among these bottles, with the cellars that do have them. */
   elsewhere: { word: string; cellars: { name: string; wines: number }[] }[];
+  /** The ask named something the Red/White/... or body buttons would hide, so they were not applied. */
+  chipsSetAside: boolean;
 };
 
 function haystack(i: CellarItem): string {
@@ -425,6 +430,11 @@ function haystack(i: CellarItem): string {
       .filter(Boolean)
       .join(' '),
   );
+}
+
+/** True when some word in hay starts with w ("chard" finds "chardonnay", "well" misses "caldwell"). */
+function hasWordStart(hay: string, w: string): boolean {
+  return ` ${hay.replace(/[^a-z0-9]+/g, ' ')}`.includes(` ${w}`);
 }
 
 function hasWord(hay: string, phrase: string): boolean {
@@ -476,28 +486,41 @@ function ratingsByWine(notes: TastingNote[], items: CellarItem[]): Map<string, n
 
 /** The bottles to suggest tonight, best first. Only bottles in the cellar (not on order). */
 export function recommend(items: CellarItem[], o: TonightOptions): TonightResult {
-  const colour = o.colour ?? o.ask.colour;
-  const body = o.body ?? o.ask.body;
+  let colour = o.colour ?? o.ask.colour;
+  let body = o.body ?? o.ask.body;
 
-  let pool = items.filter((i) => i.bottles > 0);
-  if (colour) pool = pool.filter((i) => i.colour === colour);
-  if (body) pool = pool.filter((i) => i.body === body);
+  const inCellar = items.filter((i) => i.bottles > 0);
+  const styled = (c: string | null, b: string | null) =>
+    inCellar.filter((i) => (!c || i.colour === c) && (!b || i.body === b));
+  let pool = styled(colour, body);
 
-  // Names, places and years in the ask narrow the list, if anything matches them.
-  // Words that match nothing anywhere ("recommend", "nice") are ignored. Words
-  // that match bottles in another cellar, or outside the chosen chips, still
-  // narrow the list here, so the answer is "none here" instead of guesses.
+  // Names, grapes, places and years in the ask narrow the list. Words that
+  // match nothing anywhere ("recommend", "nice") are ignored. A word that only
+  // matches bottles hidden by the style buttons sets those buttons aside for
+  // this question (the ask is more specific). A word that only matches bottles
+  // in another cellar narrows the list to none here and is reported.
   const matchedWords: string[] = [];
   const elsewhere: TonightResult['elsewhere'] = [];
+  let chipsSetAside = false;
   if (o.ask.words.length > 0) {
-    const hays = new Map(pool.map((i) => [i.vintageId, haystack(i)]));
+    const hay = new Map(inCellar.map((i) => [i.vintageId, haystack(i)]));
+    // Whole words or word starts, so "well" does not match "Caldwell".
+    const hit = (i: CellarItem, w: string) => hasWordStart(hay.get(i.vintageId) ?? haystack(i), w);
+    const has = (list: CellarItem[], w: string) => list.some((i) => hit(i, w));
+    const unstyled = styled(o.ask.colour, o.ask.body);
     const others = (o.everywhere ?? []).filter((i) => i.bottles > 0);
+    const here: string[] = [];
     for (const w of o.ask.words) {
-      if (pool.some((i) => hays.get(i.vintageId)!.includes(w))) {
-        matchedWords.push(w);
+      if (has(pool, w)) {
+        here.push(w);
         continue;
       }
-      const there = others.filter((i) => haystack(i).includes(w));
+      if ((o.colour || o.body) && has(unstyled, w)) {
+        here.push(w);
+        chipsSetAside = true;
+        continue;
+      }
+      const there = others.filter((i) => hasWordStart(haystack(i), w));
       if (there.length === 0) continue;
       matchedWords.push(w);
       const counts = new Map<string, number>();
@@ -509,9 +532,22 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
         cellars: [...counts].map(([name, wines]) => ({ name, wines })),
       });
     }
-    if (matchedWords.length > 0) {
-      pool = pool.filter((i) => matchedWords.every((w) => hays.get(i.vintageId)!.includes(w)));
+    if (chipsSetAside) {
+      colour = o.ask.colour;
+      body = o.ask.body;
+      pool = styled(colour, body);
     }
+    // Narrow word by word; a word that would leave nothing (two names that
+    // never meet, like "chardonnay" and "barolo") is skipped, not fatal.
+    for (const w of here) {
+      const narrowed = pool.filter((i) => hit(i, w));
+      if (narrowed.length > 0) {
+        pool = narrowed;
+        matchedWords.push(w);
+      }
+    }
+    // Something named lives only in another cellar: none here.
+    if (elsewhere.length > 0) pool = [];
   }
 
   // Food named: keep to the colours that suit it, unless the owner chose a colour.
@@ -556,7 +592,7 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
       a.item.wineName.localeCompare(b.item.wineName) ||
       (a.item.vintage ?? 0) - (b.item.vintage ?? 0),
   );
-  return { picks, matchedWords, foodIgnored, elsewhere };
+  return { picks, matchedWords, foodIgnored, elsewhere, chipsSetAside };
 }
 
 /** "Full reds", "Whites", "Light", or "" when nothing is chosen. */

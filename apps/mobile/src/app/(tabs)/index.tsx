@@ -159,7 +159,9 @@ export default function TonightScreen() {
     filter === ALL_CELLARS
       ? 'All cellars'
       : (data.cellars.find((c) => c.id === filter)?.name ?? 'All cellars');
-  const style = styleLine(colour ?? ask.colour, body ?? ask.body);
+  const style = result.chipsSetAside
+    ? styleLine(ask.colour, ask.body)
+    : styleLine(colour ?? ask.colour, body ?? ask.body);
   const byId = new Map(items.map((i) => [i.vintageId, i]));
   const sommelierPicks =
     current?.state === 'done'
@@ -253,6 +255,33 @@ export default function TonightScreen() {
               ? `${cap(ask.foods.map((f) => f.dish).join(' and '))} usually suits another colour, so these are simply the best ready ${style ? style.toLowerCase() : 'wines'}.`
               : `Chosen to go with ${ask.foods.map((f) => f.dish).join(' and ')}.`}
           </T>
+        )}
+
+        {result.chipsSetAside && (
+          <View style={styles.setAside}>
+            <T variant="caption" style={{ flex: 1 }}>
+              Your question is more specific than the{' '}
+              {[
+                COLOUR_CHIPS.find((c) => c.key === colour)?.label,
+                BODY_CHIPS.find((b) => b.key === body)?.label,
+              ]
+                .filter(Boolean)
+                .join(' and ')}{' '}
+              buttons, so they’re set aside for it.
+            </T>
+            <Pressable
+              onPress={() => {
+                setColour(null);
+                setBody(null);
+              }}
+              accessibilityRole="button"
+              hitSlop={8}
+            >
+              <T variant="bodyStrong" style={{ color: colors.accent, fontSize: 13 }}>
+                Clear them
+              </T>
+            </Pressable>
+          </View>
         )}
 
         {result.elsewhere.map((e) => (
@@ -671,6 +700,7 @@ const styles = StyleSheet.create({
   readyRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xs },
   readyText: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 16 },
   more: { alignSelf: 'center', paddingVertical: space.sm },
+  setAside: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   elsewhere: {
     padding: space.lg,
     borderRadius: radius.lg,

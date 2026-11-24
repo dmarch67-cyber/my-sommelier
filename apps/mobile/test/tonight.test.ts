@@ -277,14 +277,54 @@ test('a grape or country in another cellar gives "none here", not a guess', () =
     [barolo],
   );
 
-  // Found in this cellar, but the Red chip hides it.
-  const red = recommend([chard, barolo], {
+  // Found in this cellar, but the Red and Medium buttons would hide it: the ask wins.
+  const halibut = recommend([chard, barolo], {
     year: YEAR,
     colour: 'red',
-    body: null,
-    ask: parseAsk('chardonnay'),
+    body: 'medium',
+    ask: parseAsk('a chardonnay wine that goes well with halibut'),
     everywhere,
   });
-  assert.equal(red.picks.length, 0);
-  assert.equal(red.elsewhere[0].word, 'chardonnay');
+  assert.equal(halibut.chipsSetAside, true);
+  assert.deepEqual(
+    halibut.picks.map((p) => p.item),
+    [chard],
+  );
+  assert.equal(halibut.picks[0].dish, 'halibut');
+  assert.equal(halibut.foodIgnored, false);
+});
+
+test('everyday words do not knock out the match ("goes well with")', () => {
+  const chard = item({
+    wineName: 'Kistler Vine Hill',
+    colour: 'white',
+    body: 'medium',
+    grapes: ['Chardonnay'],
+  });
+  const caldwell = item({ wineName: 'Caldwell Rocket Science', colour: 'red' });
+  const r = recommend([chard, caldwell], {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('a chardonnay that goes well with halibut'),
+    everywhere: [chard, caldwell],
+  });
+  assert.deepEqual(
+    r.picks.map((p) => p.item),
+    [chard],
+  );
+  assert.equal(r.foodIgnored, false);
+  assert.equal(r.picks[0].dish, 'halibut');
+
+  // Two names that never meet: the second is skipped instead of emptying the list.
+  const r2 = recommend([chard, caldwell], {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('kistler caldwell'),
+  });
+  assert.deepEqual(
+    r2.picks.map((p) => p.item),
+    [chard],
+  );
 });
