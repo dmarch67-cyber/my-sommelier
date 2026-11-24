@@ -52,7 +52,7 @@ type CellarData = {
 };
 
 /** latestYear: the newest note the review found, shown as "Notes through 2024". */
-export type PalateSettings = { quiz: Record<string, string>; not_really: string[] };
+export type PalateSettings = { quiz: Record<string, string | string[]>; not_really: string[] };
 
 export type CriticsSay = { text: string; url: string | null; latestYear: number | null };
 

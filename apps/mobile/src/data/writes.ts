@@ -148,7 +148,7 @@ export async function deleteNote(id: string): Promise<void> {
 /** Saves the taste quiz answers and the profile lines marked "not really". */
 export async function savePalate(
   accountId: string,
-  settings: { quiz: Record<string, string>; not_really: string[] },
+  settings: { quiz: Record<string, string | string[]>; not_really: string[] },
 ): Promise<void> {
   const { error } = await supabase
     .from('palate_profiles')
