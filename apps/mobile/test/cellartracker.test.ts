@@ -130,3 +130,35 @@ test('matching: same year and best name; ties and strangers are left alone', () 
   assert.equal(unmatchedApp, 2);
   assert.equal(unmatchedCt, 2);
 });
+
+test('own notes: Notes export first, a bare MY score only when there is no note', async () => {
+  const { ownNotes, ctDate } = await import('../../../supabase/functions/sync-cellartracker/ct.ts');
+  assert.equal(ctDate('5/4/2019'), '2019-05-04');
+  assert.equal(ctDate('2021-11-03 00:00'), '2021-11-03');
+  assert.equal(ctDate(''), null);
+  const list = [
+    { iWine: '1', MY: '95' },
+    { iWine: '2', MY: '91' },
+    { iWine: '3', MY: '' },
+    { iWine: '9', MY: '99' }, // not in the app
+  ];
+  const notes = [
+    { iNote: '700', iWine: '1', TastingDate: '5/4/2019', Rating: '96', TastingNotes: 'Superb.' },
+    { iNote: '701', iWine: '3', TastingDate: '1/2/2020', Rating: '0', TastingNotes: '' },
+  ];
+  const matches = [
+    { vintage_id: 'v1', ct_id: '1' },
+    { vintage_id: 'v2', ct_id: '2' },
+    { vintage_id: 'v3', ct_id: '3' },
+  ];
+  assert.deepEqual(ownNotes(list, notes, matches), [
+    {
+      vintage_id: 'v1',
+      source_ref: 'ct:700',
+      tasted_on: '2019-05-04',
+      rating: 96,
+      notes: 'Superb.',
+    },
+    { vintage_id: 'v2', source_ref: 'score:2', tasted_on: null, rating: 91, notes: null },
+  ]);
+});

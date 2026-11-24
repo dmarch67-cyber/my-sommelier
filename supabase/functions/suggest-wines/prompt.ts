@@ -51,6 +51,7 @@ Rules:
 - Pick up to ${MAX_PICKS} bottles, best first. Fewer is fine when only one or two truly fit.
 - Weigh, in this order: what suits the food or mood they describe; how ready the bottle is tonight (prefer "Drink soon" and "At its peak"; avoid "Drink up: past its window" unless it clearly fits); quality (score).
 - If they name a style, region, grape or occasion, honour it.
+- When the owner's palate is given, prefer bottles that fit it, as a tie-breaker after food and readiness. If they ask to be surprised, choose good bottles outside their usual favourites instead. Never mention the profile itself.
 - "why" is one short sentence (under 20 words) in plain, warm language a non-expert enjoys: why this bottle with this dish tonight. No scores, no drinking-window years, no source names.
 - "note" is optional: one short sentence of serving advice that applies to the whole answer (decanting, temperature), or null.
 - If the ask is not about choosing a wine to drink, return no picks and a short friendly note.`;
@@ -68,9 +69,10 @@ function line(c: Candidate): string {
   ].join(' | ');
 }
 
-export function userText(ask: string, candidates: Candidate[]): string {
+export function userText(ask: string, candidates: Candidate[], palate?: string): string {
+  const taste = palate ? `\nThe owner's palate: ${palate}\n` : '';
   return `Tonight's ask: ${ask}
-
+${taste}
 Bottles to choose from (id | wine | place | style | grapes | readiness | score | bottles):
 ${candidates.map(line).join('\n')}`;
 }
@@ -125,4 +127,11 @@ export function cleanSuggestion(raw: unknown, candidates: Candidate[]): Suggesti
   }
   const note = typeof o.note === 'string' && o.note.trim() ? o.note.trim().slice(0, 240) : null;
   return { picks, note };
+}
+
+/** The palate sentences from the app, kept short and on one line. */
+export function cleanPalate(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.replace(/\s+/g, ' ').trim().slice(0, 1000);
+  return t || undefined;
 }

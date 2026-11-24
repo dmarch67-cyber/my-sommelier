@@ -17,6 +17,7 @@ import { Button, Chip, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
 import { useLastCellar } from '../../data/lastCellar';
 import { askSommelier, SuggestError, type Suggestion } from '../../data/suggest';
+import { palateText } from '../../logic/palate';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
 import { useVoiceInput } from '../../lib/voice';
 import { ALL_CELLARS, groupInventory, plural, ripeness, type CellarItem } from '../../logic/cellar';
@@ -83,8 +84,9 @@ export default function TonightScreen() {
         everywhere,
         maturity: data.maturity,
         notes: data.notes,
+        palate: data.palate,
       }),
-    [items, year, colour, body, ask, everywhere, data.maturity, data.notes],
+    [items, year, colour, body, ask, everywhere, data.maturity, data.notes, data.palate],
   );
 
   // Back to the first page whenever the question changes.
@@ -107,6 +109,7 @@ export default function TonightScreen() {
         everywhere,
         maturity: data.maturity,
         notes: data.notes,
+        palate: data.palate,
       })
         .picks.filter((p) => !p.ready.excluded)
         .slice(0, SOMMELIER_CANDIDATES)
@@ -114,7 +117,7 @@ export default function TonightScreen() {
       if (candidates.length === 0) return;
       setAsked({ state: 'asking', key, ask: q });
       try {
-        const suggestion = await askSommelier(q, candidates);
+        const suggestion = await askSommelier(q, candidates, palateText(data.palate));
         setAsked((a) =>
           a.state === 'asking' && a.key === key ? { state: 'done', key, ask: q, suggestion } : a,
         );
@@ -130,7 +133,18 @@ export default function TonightScreen() {
         );
       }
     },
-    [colour, body, filter, items, everywhere, year, data.maturity, data.notes, sommelierOff],
+    [
+      colour,
+      body,
+      filter,
+      items,
+      everywhere,
+      year,
+      data.maturity,
+      data.notes,
+      data.palate,
+      sommelierOff,
+    ],
   );
 
   // A dish tapped on a Wine page arrives as ?ask=…: type it in and ask.

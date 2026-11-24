@@ -3,12 +3,12 @@ import { useMemo } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ComingSoon } from '../../components/ComingSoon';
+import { Icon } from '../../components/Icon';
 import { Stars } from '../../components/controls';
 import { T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
 import { formatDay } from '../../lib/format';
-import { MAX_CONTENT_WIDTH, colors, space } from '../../lib/theme';
+import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 
 /** Your own tasting notes, newest first. */
 export default function NotesScreen() {
@@ -21,20 +21,11 @@ export default function NotesScreen() {
     return [...data.notes]
       .sort(
         (a, b) =>
-          b.tasted_on.localeCompare(a.tasted_on) || b.created_at.localeCompare(a.created_at),
+          (b.tasted_on ?? '').localeCompare(a.tasted_on ?? '') ||
+          b.created_at.localeCompare(a.created_at),
       )
       .map((n) => ({ ...n, wine: names.get(n.vintage_id) ?? 'Wine' }));
   }, [data.notes, data.inventory]);
-
-  if (data.status === 'ready' && notes.length === 0) {
-    return (
-      <ComingSoon
-        icon="note"
-        title="No notes yet"
-        text="When you tap Drink one on a wine, you can give it stars and a line. Your notes collect here."
-      />
-    );
-  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -43,9 +34,39 @@ export default function NotesScreen() {
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          <T variant="title" style={{ marginBottom: space.md }}>
-            Notes
-          </T>
+          <View style={{ gap: space.lg, marginBottom: space.md }}>
+            <T variant="title">Notes</T>
+            <Pressable
+              onPress={() => router.push('/palate')}
+              accessibilityRole="button"
+              accessibilityLabel="My palate"
+              style={({ pressed }) => [styles.palate, pressed && { opacity: 0.85 }]}
+            >
+              <View style={{ flex: 1, gap: space.xs }}>
+                <T variant="overline" style={{ color: colors.accent }}>
+                  My palate
+                </T>
+                <T variant="body" numberOfLines={3}>
+                  {data.status === 'ready' ? data.palate.headline : 'Working it out…'}
+                </T>
+                {data.status === 'ready' && !data.palate.quizDone ? (
+                  <T variant="caption" style={{ color: colors.accent }}>
+                    Take the 2-minute taste quiz
+                  </T>
+                ) : null}
+              </View>
+              <Icon name="chevron" size={20} color={colors.textMuted} />
+            </Pressable>
+            {notes.length > 0 ? <T variant="overline">Your notes</T> : null}
+          </View>
+        }
+        ListEmptyComponent={
+          data.status === 'ready' ? (
+            <T variant="caption">
+              No notes yet. When you tap Drink one on a wine, give it a thumbs up or down, and stars
+              and a line if you like. Your notes collect here.
+            </T>
+          ) : undefined
         }
         renderItem={({ item }) => (
           <Pressable
@@ -57,7 +78,15 @@ export default function NotesScreen() {
               <T variant="bodyStrong" style={{ flex: 1 }} numberOfLines={1}>
                 {item.wine}
               </T>
-              <T variant="caption">{formatDay(item.tasted_on)}</T>
+              <T variant="caption">
+                {[
+                  item.liked === true ? '👍' : item.liked === false ? '👎' : null,
+                  item.tasted_on ? formatDay(item.tasted_on) : null,
+                  item.source === 'cellartracker' ? 'CellarTracker' : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </T>
             </View>
             {item.rating ? <Stars value={Math.round(item.rating / 20)} size={16} /> : null}
             {item.notes ? <T variant="body">{item.notes}</T> : null}
@@ -79,4 +108,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   head: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
+  palate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.lg,
+    padding: space.lg,
+  },
 });

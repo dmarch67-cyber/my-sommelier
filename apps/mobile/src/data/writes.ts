@@ -110,6 +110,8 @@ export type NoteInput = {
   food_pairing: string;
   occasion: string;
   would_buy_again: boolean | null;
+  /** Thumbs up (true) or down (false). */
+  liked?: boolean | null;
 };
 
 /** Saves (or updates) the note for a bottle just drunk. Stars are stored as a score out of 100. */
@@ -126,6 +128,7 @@ export async function saveNote(
     food_pairing: input.food_pairing.trim() || null,
     occasion: input.occasion.trim() || null,
     would_buy_again: input.would_buy_again,
+    ...(input.liked != null ? { liked: input.liked } : {}),
   };
   if (existingId) {
     const { error } = await supabase.from('tasting_notes').update(row).eq('id', existingId);
@@ -139,5 +142,16 @@ export async function saveNote(
 
 export async function deleteNote(id: string): Promise<void> {
   const { error } = await supabase.from('tasting_notes').delete().eq('id', id);
+  fail(error);
+}
+
+/** Saves the taste quiz answers and the profile lines marked "not really". */
+export async function savePalate(
+  accountId: string,
+  settings: { quiz: Record<string, string>; not_really: string[] },
+): Promise<void> {
+  const { error } = await supabase
+    .from('palate_profiles')
+    .upsert({ account_id: accountId, ...settings }, { onConflict: 'account_id' });
   fail(error);
 }

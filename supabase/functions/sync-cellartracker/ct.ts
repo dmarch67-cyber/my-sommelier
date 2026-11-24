@@ -54,7 +54,8 @@ export function looksLikeExport(rows: Record<string, string>[]): boolean {
 }
 
 // Score columns in the export, by the app's score source names. Columns not
-// listed are ignored; MY (the owner's own score) is left out on purpose.
+// listed are ignored; MY (the owner's own score) is not a critic score: it
+// goes in as the owner's own note instead (see ownNotes).
 export const SCORE_COLUMNS: Record<string, { source: string; detail: string }> = {
   CT: { source: 'cellartracker', detail: 'CellarTracker community' },
   AG: { source: 'vinous', detail: 'Vinous (Antonio Galloni)' },
@@ -282,4 +283,82 @@ export function matchRows(
     unmatchedApp: vintages.length - matches.length,
     unmatchedCt: rows.filter((r) => !used.has(r)).length,
   };
+}
+
+// The owner's own notes and scores ---------------------------------------------
+// Only ever the owner's own: the List export's MY column (their score) and
+// the Notes export (their tasting notes). Never other people's notes.
+
+export type OwnNote = {
+  vintage_id: string;
+  /** "ct:<note id>" for a CellarTracker note, "score:<iWine>" for a bare score. */
+  source_ref: string;
+  tasted_on: string | null;
+  rating: number | null;
+  notes: string | null;
+};
+
+/** CellarTracker dates come as "5/4/2019" (US order) or "2019-05-04". */
+export function ctDate(v: string | undefined): string | null {
+  const s = (v ?? '').trim();
+  let y: number, m: number, d: number;
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (iso) [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  else if (us) [y, m, d] = [Number(us[3]), Number(us[1]), Number(us[2])];
+  else return null;
+  if (y < 1950 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function ownRating(raw: string | undefined): number | null {
+  const p = raw ? parseScore(raw) : null;
+  if (!p) return null;
+  const v = p.value_high != null ? (p.value_low + p.value_high) / 2 : p.value_low;
+  return v >= 50 ? Math.round(v * 10) / 10 : null; // CT uses 50-100; 0 means "no score"
+}
+
+/**
+ * The owner's notes for the matched vintages. Each note in the Notes export
+ * becomes one note; a wine with a MY score but no note gets one bare score.
+ * Rows of wines not in the app are skipped.
+ */
+export function ownNotes(
+  listRows: Record<string, string>[],
+  noteRows: Record<string, string>[],
+  matches: Pick<CtMatch, 'vintage_id' | 'ct_id'>[],
+): OwnNote[] {
+  const vintageOf = new Map<string, string>();
+  for (const m of matches) if (m.ct_id) vintageOf.set(m.ct_id, m.vintage_id);
+  const out: OwnNote[] = [];
+  const withNote = new Set<string>();
+  for (const r of noteRows) {
+    const vintage = vintageOf.get(r.iWine ?? '');
+    const id = (r.iNote ?? r.NoteID ?? '').trim();
+    if (!vintage || !id) continue;
+    const text = (r.TastingNotes ?? r.Notes ?? r.Note ?? '').trim() || null;
+    const rating = ownRating(r.Rating ?? r.Score);
+    if (rating == null && !text) continue;
+    out.push({
+      vintage_id: vintage,
+      source_ref: `ct:${id}`,
+      tasted_on: ctDate(r.TastingDate ?? r.Date),
+      rating,
+      notes: text ? text.slice(0, 4000) : null,
+    });
+    withNote.add(r.iWine);
+  }
+  for (const r of listRows) {
+    const vintage = vintageOf.get(r.iWine ?? '');
+    const rating = ownRating(r.MY);
+    if (!vintage || rating == null || withNote.has(r.iWine)) continue;
+    out.push({
+      vintage_id: vintage,
+      source_ref: `score:${r.iWine}`,
+      tasted_on: null,
+      rating,
+      notes: null,
+    });
+  }
+  return out;
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { supabase } from '../lib/supabase';
 import { fillInWines } from './enrich';
+import { savePalate } from './writes';
 import {
   bestScoreByVintage,
   type Accolade,
@@ -12,6 +13,7 @@ import {
   type Score,
   type TastingNote,
 } from '../logic/cellar';
+import { buildProfile, type PalateProfile, type VintageDrinking } from '../logic/palate';
 
 /**
  * Loads the signed-in account's cellar once and keeps it in memory. Dan's
@@ -35,11 +37,23 @@ type CellarData = {
   /** "What critics and drinkers say" for each vintage, by vintage id. */
   critics: Map<string, CriticsSay>;
   bestScores: Map<string, Score>;
+  /** Bottles bought and drunk per vintage (all cellars), for the palate profile. */
+  drinking: VintageDrinking[];
+  /** The taste quiz answers and lines marked "not really"; null until saved once. */
+  palateSettings: PalateSettings | null;
+  /** The owner's palate, worked out from all of the above. */
+  palate: PalateProfile;
+  /** The signed-in user's account (for saving settings). */
+  accountId: string | null;
+  /** Changes the quiz answers or "not really" lines: shown at once, saved in the background. */
+  updatePalate: (settings: PalateSettings) => Promise<void>;
   /** Fetches everything again. Screens keep showing the old data meanwhile. */
   reload: () => Promise<void>;
 };
 
 /** latestYear: the newest note the review found, shown as "Notes through 2024". */
+export type PalateSettings = { quiz: Record<string, string>; not_really: string[] };
+
 export type CriticsSay = { text: string; url: string | null; latestYear: number | null };
 
 const Ctx = createContext<CellarData | null>(null);
@@ -95,7 +109,31 @@ const SCORE_COLUMNS =
 const NOTE_COLUMNS =
   'id,account_id,vintage_id,inventory_event_id,tasted_on,rating,maturity,notes,food_pairing,occasion,would_buy_again,created_at';
 
-type Loaded = Omit<CellarData, 'bestScores' | 'reload'>;
+type Loaded = Omit<CellarData, 'bestScores' | 'reload' | 'palate' | 'accountId' | 'updatePalate'>;
+
+/** Optional extras added with the palate profile: an older database just gives none. */
+async function loadPalate(): Promise<Pick<Loaded, 'drinking' | 'palateSettings'>> {
+  const [drinking, settings] = await Promise.all([
+    fetchAll<VintageDrinking>('vintage_drinking', 'vintage_id,bought,drunk', 'vintage_id').catch(
+      () => [] as VintageDrinking[],
+    ),
+    fetchAll<PalateSettings & { account_id: string }>(
+      'palate_profiles',
+      'account_id,quiz,not_really',
+      'account_id',
+    ).catch(() => []),
+  ]);
+  return { drinking, palateSettings: settings[0] ?? null };
+}
+
+/** Notes with the thumbs and source columns, or without them on an older database. */
+async function loadNotes(): Promise<TastingNote[]> {
+  try {
+    return await fetchAll<TastingNote>('tasting_notes', `${NOTE_COLUMNS},liked,source`, 'id');
+  } catch {
+    return fetchAll<TastingNote>('tasting_notes', NOTE_COLUMNS, 'id');
+  }
+}
 
 type Review = {
   vintage_id: string;
@@ -141,15 +179,26 @@ async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
 }
 
 async function loadAll(): Promise<Loaded> {
-  const [cellars, inventory, scores, accolades, notes, reviews] = await Promise.all([
+  const [cellars, inventory, scores, accolades, notes, reviews, palate] = await Promise.all([
     fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
     fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
     fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
     fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
-    fetchAll<TastingNote>('tasting_notes', NOTE_COLUMNS, 'id'),
+    loadNotes(),
     loadReviews(),
+    loadPalate(),
   ]);
-  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes, ...reviews };
+  return {
+    status: 'ready',
+    error: null,
+    cellars,
+    inventory,
+    scores,
+    accolades,
+    notes,
+    ...reviews,
+    ...palate,
+  };
 }
 
 export function CellarDataProvider({ children }: { children: ReactNode }) {
@@ -163,6 +212,8 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     notes: [],
     maturity: new Map(),
     critics: new Map(),
+    drinking: [],
+    palateSettings: null,
   });
 
   const reload = useCallback(async () => {
@@ -193,6 +244,35 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
   }, [loaded, reload]);
 
   const bestScores = useMemo(() => bestScoreByVintage(state.scores), [state.scores]);
+  const palate = useMemo(
+    () =>
+      buildProfile({
+        rows: state.inventory,
+        drinking: state.drinking,
+        notes: state.notes,
+        quiz: state.palateSettings?.quiz,
+        notReally: state.palateSettings?.not_really,
+      }),
+    [state.inventory, state.drinking, state.notes, state.palateSettings],
+  );
+  const accountId = state.inventory[0]?.account_id ?? null;
+  const updatePalate = useCallback(
+    async (settings: PalateSettings) => {
+      if (!accountId) throw new Error('Your cellar has not loaded yet.');
+      let before: PalateSettings | null = null;
+      setState((s) => {
+        before = s.palateSettings;
+        return { ...s, palateSettings: settings };
+      });
+      try {
+        await savePalate(accountId, settings);
+      } catch (e) {
+        setState((s) => ({ ...s, palateSettings: before }));
+        throw e;
+      }
+    },
+    [accountId],
+  );
   const retry = useCallback(async () => {
     setState((s) => ({ ...s, status: 'loading', error: null }));
     await reload();
@@ -200,7 +280,14 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ ...state, bestScores, reload: state.status === 'error' ? retry : reload }}
+      value={{
+        ...state,
+        bestScores,
+        palate,
+        accountId,
+        updatePalate,
+        reload: state.status === 'error' ? retry : reload,
+      }}
     >
       {children}
     </Ctx.Provider>
