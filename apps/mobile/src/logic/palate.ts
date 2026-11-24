@@ -19,6 +19,7 @@ export type QuizKey =
   | 'body'
   | 'world'
   | 'redStyle'
+  | 'whiteStyle'
   | 'fruit'
   | 'tannin'
   | 'acidity'
@@ -26,11 +27,14 @@ export type QuizKey =
   | 'age'
   | 'adventure';
 
-export type QuizAnswers = Partial<Record<QuizKey, string>>;
+/** One answer, or several for a "pick as many as you like" question. */
+export type QuizAnswers = Partial<Record<QuizKey, string | string[]>>;
 
 export type QuizQuestion = {
   key: QuizKey;
   question: string;
+  /** More than one answer allowed. */
+  multi?: boolean;
   /** says: how the answer reads in the summary ("firm structure"); the label when absent. */
   options: { key: string; label: string; says?: string }[];
 };
@@ -38,41 +42,57 @@ export type QuizQuestion = {
 export const QUIZ: QuizQuestion[] = [
   {
     key: 'colour',
-    question: 'Most nights, what do you reach for?',
+    question: 'Which do you enjoy?',
+    multi: true,
     options: [
       { key: 'red', label: 'Red' },
       { key: 'white', label: 'White' },
-      { key: 'either', label: 'Either, it depends' },
+      { key: 'rose', label: 'Rosé' },
+      { key: 'sparkling', label: 'Sparkling' },
     ],
   },
   {
     key: 'body',
     question: 'How full do you like a wine?',
+    multi: true,
     options: [
       { key: 'light', label: 'Light and fresh' },
       { key: 'medium', label: 'In the middle' },
       { key: 'full', label: 'Big and full' },
-      { key: 'any', label: 'No preference' },
     ],
   },
   {
     key: 'world',
     question: 'Old World or New World?',
+    multi: true,
     options: [
       { key: 'old', label: 'Old World (France, Italy, Spain)' },
       { key: 'new', label: 'New World (California, Oregon, Australia)' },
-      { key: 'both', label: 'Both equally' },
     ],
   },
   {
     key: 'redStyle',
-    question: 'Your favourite kind of red?',
+    question: 'Which reds do you love?',
+    multi: true,
     options: [
       { key: 'cabernet', label: 'Cabernet and Bordeaux blends' },
       { key: 'pinot', label: 'Pinot Noir and Burgundy' },
       { key: 'rhone', label: 'Grenache, Syrah and Rhône blends' },
       { key: 'spain', label: 'Tempranillo and Spanish reds' },
       { key: 'italy', label: 'Sangiovese and Nebbiolo' },
+      { key: 'zin', label: 'Zinfandel and Petite Sirah' },
+    ],
+  },
+  {
+    key: 'whiteStyle',
+    question: 'Which whites do you love?',
+    multi: true,
+    options: [
+      { key: 'chardonnay', label: 'Chardonnay and white Burgundy' },
+      { key: 'sauvignon', label: 'Sauvignon Blanc and Sancerre' },
+      { key: 'riesling', label: 'Riesling' },
+      { key: 'chenin', label: 'Chenin Blanc' },
+      { key: 'rhone', label: 'Rhône whites (Viognier, Marsanne)' },
     ],
   },
   {
@@ -131,9 +151,41 @@ export const QUIZ: QuizQuestion[] = [
   },
 ];
 
-function answerLabel(q: QuizKey, a: string | undefined): string | null {
-  const o = QUIZ.find((x) => x.key === q)?.options.find((x) => x.key === a);
-  return o ? (o.says ?? o.label) : null;
+// Answers saved before a question allowed several picks, and what they mean now.
+const ALL_OF: Partial<Record<QuizKey, Record<string, string[]>>> = {
+  colour: { either: ['red', 'white'] },
+  body: { any: ['light', 'medium', 'full'] },
+  world: { both: ['old', 'new'] },
+};
+
+/** The answers to one question as a list (one answer for a single-choice question). */
+export function quizPicks(q: QuizAnswers, key: QuizKey): string[] {
+  const v = q[key];
+  if (v == null) return [];
+  const list = Array.isArray(v) ? v : [v];
+  return list.flatMap((a) => ALL_OF[key]?.[a] ?? [a]);
+}
+
+/** The answer to a single-choice question, or ''. */
+function one(q: QuizAnswers, key: QuizKey): string {
+  const v = q[key];
+  return typeof v === 'string' ? v : '';
+}
+
+/** A multi-choice question with every option picked says nothing either way. */
+function allPicked(key: QuizKey, picks: string[]): boolean {
+  const q = QUIZ.find((x) => x.key === key);
+  return !!q && q.options.every((o) => picks.includes(o.key));
+}
+
+function answerLabel(q: QuizKey, a: string | string[] | undefined): string | null {
+  const keys = Array.isArray(a) ? a : a ? [a] : [];
+  const opts = QUIZ.find((x) => x.key === q)?.options ?? [];
+  const labels = keys
+    .map((k) => opts.find((x) => x.key === k))
+    .filter(Boolean)
+    .map((o) => o!.says ?? o!.label);
+  return labels.length ? labels.join(', ') : null;
 }
 
 // What grapes are usually like ------------------------------------------------
@@ -207,6 +259,15 @@ const RED_STYLE_GRAPES: Record<string, string[]> = {
   rhone: ['grenache', 'garnacha', 'syrah', 'shiraz', 'mourvèdre', 'carignan'],
   spain: ['tempranillo', 'tinto fino', 'garnacha', 'monastrell'],
   italy: ['sangiovese', 'nebbiolo'],
+  zin: ['zinfandel', 'petite sirah'],
+};
+
+const WHITE_STYLE_GRAPES: Record<string, string[]> = {
+  chardonnay: ['chardonnay'],
+  sauvignon: ['sauvignon blanc'],
+  riesling: ['riesling'],
+  chenin: ['chenin blanc'],
+  rhone: ['viognier', 'marsanne', 'roussanne', 'grenache blanc'],
 };
 
 // The profile -----------------------------------------------------------------
@@ -492,7 +553,16 @@ export function buildProfile(input: {
   const quizParts = (['fruit', 'tannin', 'acidity', 'oak', 'age'] as QuizKey[])
     .map((k) => answerLabel(k, quiz[k]))
     .filter((l): l is string => !!l && l !== 'No preference');
-  const quizLine = quizParts.length ? `From your quiz: ${quizParts.join(', ')}.` : null;
+  const reds = answerLabel('redStyle', quiz.redStyle);
+  const whites = answerLabel('whiteStyle', quiz.whiteStyle);
+  const quizLine =
+    [
+      quizParts.length ? `From your quiz: ${quizParts.join(', ')}.` : null,
+      reds ? `Reds you love: ${reds}.` : null,
+      whites ? `Whites you love: ${whites}.` : null,
+    ]
+      .filter(Boolean)
+      .join(' ') || null;
 
   return {
     bottlesBought,
@@ -522,30 +592,39 @@ const BODY_ORDER = ['light', 'medium', 'full'];
 /** 0..1: how well the quiz answers fit a wine; null when the quiz says nothing about it. */
 function quizFit(i: CellarItem, q: QuizAnswers): number | null {
   const parts: number[] = [];
-  if (q.colour === 'red' || q.colour === 'white') {
-    if (i.colour) parts.push(i.colour === q.colour ? 1 : 0.2);
+  const colours = quizPicks(q, 'colour');
+  if (colours.length && !allPicked('colour', colours) && i.colour) {
+    parts.push(colours.includes(i.colour) ? 1 : 0.2);
   }
-  if (q.body && BODY_ORDER.includes(q.body) && i.body && BODY_ORDER.includes(i.body)) {
-    const gap = Math.abs(BODY_ORDER.indexOf(q.body) - BODY_ORDER.indexOf(i.body));
+  const bodies = quizPicks(q, 'body').filter((b) => BODY_ORDER.includes(b));
+  if (bodies.length && !allPicked('body', bodies) && i.body && BODY_ORDER.includes(i.body)) {
+    const gap = Math.min(
+      ...bodies.map((b) => Math.abs(BODY_ORDER.indexOf(b) - BODY_ORDER.indexOf(i.body!))),
+    );
     parts.push(gap === 0 ? 1 : gap === 1 ? 0.5 : 0);
   }
   const w = world(i.country);
-  if ((q.world === 'old' || q.world === 'new') && w) parts.push(w === q.world ? 1 : 0.3);
-  if (q.redStyle && i.colour === 'red') {
-    const family = RED_STYLE_GRAPES[q.redStyle] ?? [];
+  const worlds = quizPicks(q, 'world');
+  if (worlds.length && !allPicked('world', worlds) && w) parts.push(worlds.includes(w) ? 1 : 0.3);
+  const styleFit = (key: QuizKey, families: Record<string, string[]>) => {
+    const picked = quizPicks(q, key);
+    if (picked.length === 0) return;
+    const family = picked.flatMap((k) => families[k] ?? []);
     const hit = i.grapes.some((g) => family.includes(g.toLowerCase()));
     parts.push(hit ? 1 : 0.3);
-  }
+  };
+  if (i.colour === 'red') styleFit('redStyle', RED_STYLE_GRAPES);
+  if (i.colour === 'white') styleFit('whiteStyle', WHITE_STYLE_GRAPES);
   const t = traitsOf(i);
   if (t) {
     const want = (target: number, have: number) => 1 - Math.min(Math.abs(target - have), 2) / 2;
-    const fruit = { ripe: 2, balanced: 1, savoury: 0 }[q.fruit ?? ''];
+    const fruit = { ripe: 2, balanced: 1, savoury: 0 }[one(q, 'fruit')];
     if (fruit != null) parts.push(want(fruit, t.fruit));
-    const tannin = { soft: 0.5, some: 1.2, firm: 2 }[q.tannin ?? ''];
+    const tannin = { soft: 0.5, some: 1.2, firm: 2 }[one(q, 'tannin')];
     if (tannin != null && i.colour === 'red') parts.push(want(tannin, t.tannin));
-    const acid = { bright: 1.8, round: 0.6 }[q.acidity ?? ''];
+    const acid = { bright: 1.8, round: 0.6 }[one(q, 'acidity')];
     if (acid != null) parts.push(want(acid, t.acid));
-    const oak = { little: 0.3, some: 1, lots: 2 }[q.oak ?? ''];
+    const oak = { little: 0.3, some: 1, lots: 2 }[one(q, 'oak')];
     if (oak != null) parts.push(want(oak, t.oak));
   }
   if (parts.length === 0) return null;

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { CellarItem, InventoryRow } from '../src/logic/cellar.ts';
-import { buildProfile, palateFit, palateText, palateWeight } from '../src/logic/palate.ts';
+import {
+  buildProfile,
+  palateFit,
+  palateText,
+  palateWeight,
+  quizPicks,
+} from '../src/logic/palate.ts';
 import { parseAsk, recommend } from '../src/logic/tonight.ts';
 
 type W = {
@@ -240,4 +246,28 @@ test('Tonight without a profile ranks as before', () => {
     a.picks.map((x) => x.item.wineId),
     b.picks.map((x) => x.item.wineId),
   );
+});
+
+test('multi-choice answers: several reds count; old single answers still read', () => {
+  const both = buildProfile({
+    rows,
+    drinking,
+    notes: [],
+    quiz: { redStyle: ['cabernet', 'spain'] },
+  });
+  const cabOnly = buildProfile({ rows, drinking, notes: [], quiz: { redStyle: ['cabernet'] } });
+  assert.ok(palateFit(items[0], both).fit > palateFit(items[0], cabOnly).fit, 'Aalto fits Spain');
+  assert.equal(quizPicks({ colour: 'either' }, 'colour').join(), 'red,white');
+  assert.equal(quizPicks({ world: 'both' }, 'world').join(), 'old,new');
+  assert.equal(quizPicks({ body: ['medium', 'full'] }, 'body').join(), 'medium,full');
+  // Every body picked says nothing, the same as no answer.
+  const all = buildProfile({
+    rows,
+    drinking,
+    notes: [],
+    quiz: { body: ['light', 'medium', 'full'] },
+  });
+  const none = buildProfile({ rows, drinking, notes: [] });
+  assert.equal(palateFit(items[3], all).fit, palateFit(items[3], none).fit);
+  assert.match(both.quizLine ?? '', /Reds you love: Cabernet and Bordeaux blends, Tempranillo/);
 });

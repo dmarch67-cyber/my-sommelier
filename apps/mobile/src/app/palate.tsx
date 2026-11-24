@@ -74,6 +74,25 @@ export default function PalateScreen() {
           </T>
         </View>
 
+        {p.quizDone && !p.quiz.redStyle && !p.quiz.whiteStyle ? (
+          <View style={styles.quizCard}>
+            <T variant="heading">Pick every red and white you love</T>
+            <T variant="caption">
+              Five questions now let you choose more than one answer. It takes about 30 seconds, and
+              your other answers stay as they are.
+            </T>
+            <Button
+              label="Choose them now"
+              onPress={() =>
+                router.push({
+                  pathname: '/palate-quiz',
+                  params: { from: 'colour', until: 'whiteStyle' },
+                })
+              }
+            />
+          </View>
+        ) : null}
+
         {p.quizDone ? (
           <Button
             label="Redo the taste quiz"

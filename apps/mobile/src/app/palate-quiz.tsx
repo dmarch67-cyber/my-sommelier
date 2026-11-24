@@ -1,29 +1,48 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
-import { T } from '../components/ui';
+import { Button, T } from '../components/ui';
 import { useCellarData } from '../data/CellarData';
-import { QUIZ } from '../logic/palate';
+import { QUIZ, quizPicks, type QuizAnswers } from '../logic/palate';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../lib/theme';
 
-/** The taste quiz: ten one-tap questions, one per screen. Saved at the end. */
+type Answers = Record<string, string | string[]>;
+
+/**
+ * The taste quiz, one question per screen, saved at the end. Single-choice
+ * questions move on with one tap; "pick as many as you like" ones have Next.
+ * ?from=<question key> starts at that question (to redo just a few).
+ */
 export default function PalateQuizScreen() {
   const data = useCellarData();
   const toast = useToast();
-  const [answers, setAnswers] = useState<Record<string, string>>(() => ({
-    ...(data.palateSettings?.quiz ?? {}),
-  }));
-  const [step, setStep] = useState(0);
+  const { from, until } = useLocalSearchParams<{ from?: string; until?: string }>();
+  const last = until ? QUIZ.findIndex((q) => q.key === until) : -1;
+  const lastStep = last >= 0 ? last : QUIZ.length - 1;
+  const [answers, setAnswers] = useState<Answers>(() => {
+    const saved = { ...(data.palateSettings?.quiz ?? {}) };
+    // Older single answers ("Either", "Both") become the matching picks.
+    for (const q of QUIZ) {
+      if (q.multi && saved[q.key] != null) saved[q.key] = quizPicks(saved as QuizAnswers, q.key);
+    }
+    return saved;
+  });
+  const [step, setStep] = useState(() =>
+    Math.max(
+      0,
+      QUIZ.findIndex((q) => q.key === from),
+    ),
+  );
   const [saving, setSaving] = useState(false);
   const q = QUIZ[step];
 
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/palate'));
 
-  const finish = async (final: Record<string, string>) => {
+  const finish = async (final: Answers) => {
     setSaving(true);
     try {
       await data.updatePalate({
@@ -38,13 +57,32 @@ export default function PalateQuizScreen() {
     }
   };
 
-  const next = (final: Record<string, string>) => {
-    if (step + 1 < QUIZ.length) setStep(step + 1);
+  const next = (final: Answers) => {
+    if (step < lastStep) setStep(step + 1);
     else finish(final);
   };
 
   const choose = (key: string) => {
+    if (q.multi) {
+      const cur = Array.isArray(answers[q.key]) ? (answers[q.key] as string[]) : [];
+      const picks = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+      setAnswers({ ...answers, [q.key]: picks });
+      return;
+    }
     const final = { ...answers, [q.key]: key };
+    setAnswers(final);
+    next(final);
+  };
+
+  const picked = (key: string) => {
+    const v = answers[q.key];
+    return Array.isArray(v) ? v.includes(key) : v === key;
+  };
+  const multiCount = q.multi && Array.isArray(answers[q.key]) ? answers[q.key]!.length : 0;
+
+  const nextMulti = () => {
+    const final = { ...answers };
+    if (multiCount === 0) delete final[q.key];
     setAnswers(final);
     next(final);
   };
@@ -80,9 +118,10 @@ export default function PalateQuizScreen() {
           Taste quiz
         </T>
         <T variant="title">{q.question}</T>
+        {q.multi ? <T variant="caption">Pick as many as you like.</T> : null}
         <View style={{ gap: space.sm }}>
           {q.options.map((o) => {
-            const selected = answers[q.key] === o.key;
+            const selected = picked(o.key);
             return (
               <Pressable
                 key={o.key}
@@ -103,11 +142,25 @@ export default function PalateQuizScreen() {
             );
           })}
         </View>
-        <Pressable onPress={skip} disabled={saving} accessibilityRole="button" style={styles.skip}>
-          <T variant="body" style={{ color: colors.textMuted }}>
-            {saving ? 'Saving…' : 'Skip this one'}
-          </T>
-        </Pressable>
+        {q.multi ? (
+          <Button
+            label={step < lastStep ? (multiCount > 0 ? 'Next' : 'Skip this one') : 'Finish'}
+            onPress={nextMulti}
+            loading={saving}
+          />
+        ) : null}
+        {q.multi ? null : (
+          <Pressable
+            onPress={skip}
+            disabled={saving}
+            accessibilityRole="button"
+            style={styles.skip}
+          >
+            <T variant="body" style={{ color: colors.textMuted }}>
+              {saving ? 'Saving…' : 'Skip this one'}
+            </T>
+          </Pressable>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
