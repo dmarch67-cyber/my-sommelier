@@ -328,3 +328,51 @@ test('everyday words do not knock out the match ("goes well with")', () => {
     [chard],
   );
 });
+
+test('a wine named in the ask is shown even when too young, last and marked', () => {
+  const ready = item({
+    wineName: 'Walter Scott Koosah Chardonnay',
+    vintage: 2021,
+    colour: 'white',
+  });
+  const young = item({
+    wineName: 'Walter Scott Koosah Chardonnay',
+    vintage: 2024,
+    colour: 'white',
+    drinkFrom: 2029,
+    drinkTo: 2040,
+  });
+  const other = item({ wineName: 'Resonance Koosah Chardonnay', colour: 'white' });
+  const r = recommend([young, ready, other], {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('koosah'),
+  });
+  assert.equal(r.picks.at(-1)?.item, young);
+  assert.equal(r.picks.length, 3);
+  assert.equal(r.notReady, 1);
+  assert.equal(r.picks.at(-1)?.ready.state, 'young');
+  assert.equal(r.picks.at(-1)?.ready.label, 'Not ready yet. Opens 2029');
+
+  // Only young bottles match: they are all shown.
+  const only = recommend([young, other], {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('walter scott'),
+  });
+  assert.deepEqual(
+    only.picks.map((p) => p.item),
+    [young],
+  );
+  assert.equal(only.notReady, 1);
+});
+
+test('without a wine name, young wines stay off Tonight', () => {
+  const young = item({ drinkFrom: 2030, drinkTo: 2045, grapes: ['Syrah'] });
+  const r = recommend([young], { year: YEAR, colour: null, body: null, ask: parseAsk('syrah') });
+  assert.equal(r.picks.length, 0);
+  const plain = recommend([young], { year: YEAR, colour: null, body: null, ask: none });
+  assert.equal(plain.picks.length, 0);
+});

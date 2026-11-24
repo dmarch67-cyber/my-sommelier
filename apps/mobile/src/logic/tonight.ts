@@ -4,7 +4,8 @@
  *
  * A bottle's place in the list comes from, in order of weight:
  *  1. Maturity: how far into its drinking window it is (ending soon ranks
- *     highest, too young is left out). The blended review's maturity call
+ *     highest, too young is left out unless the ask names the wine, when it
+ *     is listed last and marked as not ready). The blended review's maturity call
  *     ("at its peak", "declining") overrides the window when there is one.
  *  2. Food: what the ask mentions ("lamb", "oysters") favours the right
  *     colour, body, grapes and regions.
@@ -336,14 +337,14 @@ export function parseAsk(text: string): Ask {
 
 // Ranking ---------------------------------------------------------------------
 
-export type ReadyState = 'peak' | 'ready' | 'soon' | 'past' | 'unknown';
+export type ReadyState = 'peak' | 'ready' | 'soon' | 'past' | 'young' | 'unknown';
 
 export type Readiness = {
   /** 0..1, higher = better to open now. */
   fit: number;
   state: ReadyState;
   label: string;
-  /** Too young: not shown on Tonight. */
+  /** Too young: left off Tonight, unless the ask names the wine (then listed last). */
   excluded: boolean;
 };
 
@@ -354,7 +355,9 @@ export function readiness(
   year: number,
   maturity: Maturity | null = null,
 ): Readiness {
-  if (maturity === 'too_young') return { fit: 0, state: 'ready', label: '', excluded: true };
+  if (maturity === 'too_young') {
+    return { fit: 0, state: 'young', label: 'Not ready yet', excluded: true };
+  }
   if (maturity === 'past_it') {
     return { fit: 0.3, state: 'past', label: 'May be past its best', excluded: false };
   }
@@ -364,7 +367,8 @@ export function readiness(
 
   const r = ripeness(from, to, year);
   if (r.state === 'young') {
-    return { fit: 0, state: 'ready', label: r.label, excluded: maturity !== 'peak' };
+    if (maturity === 'peak') return { fit: 0, state: 'ready', label: r.label, excluded: false };
+    return { fit: 0, state: 'young', label: `Not ready yet. Opens ${from ?? to}`, excluded: true };
   }
   if (r.state === 'unknown') {
     if (maturity === 'peak')
@@ -429,6 +433,8 @@ export type TonightResult = {
   elsewhere: { word: string; cellars: { name: string; wines: number }[] }[];
   /** The ask named something the Red/White/... or body buttons would hide, so they were not applied. */
   chipsSetAside: boolean;
+  /** How many picks are too young to open: shown only because the ask named them, and listed last. */
+  notReady: number;
 };
 
 function haystack(i: CellarItem): string {
@@ -446,6 +452,11 @@ function haystack(i: CellarItem): string {
       .filter(Boolean)
       .join(' '),
   );
+}
+
+/** The wine's own name and producer: what "named the wine" means. */
+function nameHaystack(i: CellarItem): string {
+  return fold([i.wineName, i.producer].filter(Boolean).join(' '));
 }
 
 /** True when some word in hay starts with w ("chard" finds "chardonnay", "well" misses "caldwell"). */
@@ -518,6 +529,7 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
   const matchedWords: string[] = [];
   const elsewhere: TonightResult['elsewhere'] = [];
   let chipsSetAside = false;
+  let named = false;
   if (o.ask.words.length > 0) {
     const hay = new Map(inCellar.map((i) => [i.vintageId, haystack(i)]));
     // Whole words or word starts, so "well" does not match "Caldwell".
@@ -560,6 +572,7 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
       if (narrowed.length > 0) {
         pool = narrowed;
         matchedWords.push(w);
+        if (narrowed.some((i) => hasWordStart(nameHaystack(i), w))) named = true;
       }
     }
     // Something named lives only in another cellar: none here.
@@ -583,12 +596,14 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
   const picks: Pick[] = [];
   for (const item of pool) {
     const ready = readiness(item.drinkFrom, item.drinkTo, o.year, o.maturity?.get(item.vintageId));
-    if (ready.excluded) continue;
+    // A wine asked for by name is always shown, even too young (last, marked).
+    if (ready.excluded && !named) continue;
     const food = foods.length > 0 && !foodIgnored ? foodFit(item, foods) : null;
     const rating = ratings.get(item.wineId) ?? null;
     const pref = rating == null ? 0 : Math.min(Math.max((rating - 60) / 40, 0), 1);
 
     const rank =
+      (ready.excluded ? -10 : 0) +
       0.6 * ready.fit +
       0.2 * scoreFit(item.score) +
       (food ? 0.45 * food.fit : 0) +
@@ -608,7 +623,8 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
       a.item.wineName.localeCompare(b.item.wineName) ||
       (a.item.vintage ?? 0) - (b.item.vintage ?? 0),
   );
-  return { picks, matchedWords, foodIgnored, elsewhere, chipsSetAside };
+  const notReady = picks.filter((p) => p.ready.excluded).length;
+  return { picks, matchedWords, foodIgnored, elsewhere, chipsSetAside, notReady };
 }
 
 /** "Full reds", "Whites", "Light", or "" when nothing is chosen. */

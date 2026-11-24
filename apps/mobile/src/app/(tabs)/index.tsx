@@ -42,6 +42,7 @@ const READY_COLOR: Record<ReadyState, string> = {
   ready: colors.accent,
   soon: '#9A4410',
   past: '#8A6D3B',
+  young: colors.textMuted,
   unknown: colors.textMuted,
 };
 
@@ -107,7 +108,8 @@ export default function TonightScreen() {
         maturity: data.maturity,
         notes: data.notes,
       })
-        .picks.slice(0, SOMMELIER_CANDIDATES)
+        .picks.filter((p) => !p.ready.excluded)
+        .slice(0, SOMMELIER_CANDIDATES)
         .map(toCandidate);
       if (candidates.length === 0) return;
       setAsked({ state: 'asking', key, ask: q });
@@ -334,7 +336,9 @@ export default function TonightScreen() {
 
         <View style={styles.sectionHead}>
           <T variant="heading" style={{ fontSize: 18 }}>
-            Drinking best now
+            {result.notReady === result.picks.length && result.notReady > 0
+              ? 'In your cellar, not ready yet'
+              : 'Drinking best now'}
           </T>
           <T variant="caption" numberOfLines={1} style={{ flexShrink: 1, textAlign: 'right' }}>
             {[style, cellarName].filter(Boolean).join(' · ')}
