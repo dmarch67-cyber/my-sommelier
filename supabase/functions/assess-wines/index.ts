@@ -62,7 +62,10 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!apiKey || !supabaseUrl || !serviceKey) return reply(503, { error: 'Not set up.' });
 
-  let body: { account_id?: string; max?: number } = {};
+  // mode 'refresh' (the monthly schedule): wines that are new, whose
+  // CellarTracker community score has moved, or whose review is over 90 days
+  // old, capped at 'cap' reviews per 30 days. Otherwise the first full run.
+  let body: { account_id?: string; max?: number; mode?: string; cap?: number } = {};
   try {
     body = await req.json();
   } catch {
@@ -79,10 +82,13 @@ Deno.serve(async (req) => {
   });
   if (allowed !== true) return reply(401, { error: 'Not allowed.' });
 
-  const { data: assessmentId, error: claimError } = await db.rpc('claim_next_assessment', {
-    p_account_id: accountId,
-    p_max: max,
-  });
+  const { data: assessmentId, error: claimError } =
+    body.mode === 'refresh'
+      ? await db.rpc('claim_refresh_assessment', {
+          p_account_id: accountId,
+          p_month_cap: Number.isInteger(body.cap) ? (body.cap as number) : 150,
+        })
+      : await db.rpc('claim_next_assessment', { p_account_id: accountId, p_max: max });
   if (claimError) return reply(500, { error: claimError.message });
   if (!assessmentId) return reply(200, { done: true });
 
@@ -234,7 +240,12 @@ async function readNotes(
         output_config: { effort: 'low' },
         system: readerSystem(year),
         tools: [
-          { type: 'web_search_20250305', name: 'web_search', max_uses: 6 },
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 6,
+            blocked_domains: ['vivino.com'],
+          },
           NOTES_TOOL as unknown as Anthropic.Beta.BetaTool,
         ],
         tool_choice: { type: 'auto' },

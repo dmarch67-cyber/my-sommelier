@@ -431,6 +431,9 @@ export default function WinePage() {
           {critics ? (
             <Card style={{ gap: space.md }}>
               <T variant="body">{critics.text}</T>
+              {critics.latestYear ? (
+                <T variant="caption">Notes through {critics.latestYear}</T>
+              ) : null}
               {critics.url ? (
                 <Pressable
                   onPress={() => Linking.openURL(critics.url as string)}

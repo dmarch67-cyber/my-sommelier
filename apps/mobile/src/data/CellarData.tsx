@@ -39,7 +39,8 @@ type CellarData = {
   reload: () => Promise<void>;
 };
 
-export type CriticsSay = { text: string; url: string | null };
+/** latestYear: the newest note the review found, shown as "Notes through 2024". */
+export type CriticsSay = { text: string; url: string | null; latestYear: number | null };
 
 const Ctx = createContext<CellarData | null>(null);
 
@@ -101,6 +102,7 @@ type Review = {
   maturity: Maturity | null;
   critics_say?: string | null;
   critics_url?: string | null;
+  latest_note_year?: number | null;
 };
 
 /** Optional extra: an older database without the reviews table just gives empty maps. */
@@ -109,7 +111,7 @@ async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
   try {
     rows = await fetchAll<Review>(
       'vintage_assessments',
-      'vintage_id,maturity,critics_say,critics_url',
+      'vintage_id,maturity,critics_say,critics_url,latest_note_year',
       'vintage_id',
     );
   } catch {
@@ -126,7 +128,14 @@ async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
     critics: new Map(
       rows
         .filter((r) => r.critics_say)
-        .map((r) => [r.vintage_id, { text: r.critics_say as string, url: r.critics_url ?? null }]),
+        .map((r) => [
+          r.vintage_id,
+          {
+            text: r.critics_say as string,
+            url: r.critics_url ?? null,
+            latestYear: r.latest_note_year ?? null,
+          },
+        ]),
     ),
   };
 }

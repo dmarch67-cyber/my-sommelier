@@ -129,7 +129,7 @@ export function systemPrompt(year: number): string {
 
 Weigh the evidence in this order:
 1. The owner's own tasting notes, when given.
-2. Recent tasting notes from the last two years, given below as a digest gathered from CellarTracker community notes, WineBerserkers, Reddit, merchants and critics. Several recent notes agreeing that a wine is tiring, drying out or past its peak should pull the end of the window in, even if a critic's older window runs later. Several saying it is still tight or closed should push the start out. Only vintages that are drinkable now or soon were searched.
+2. Recent tasting notes from the last two years, given below as a digest gathered from CellarTracker community notes, WineBerserkers, Reddit, merchants and critics. Several recent notes agreeing that a wine is tiring, drying out or past its peak should pull the end of the window in, even if a critic's older window runs later. Several saying it is still tight or closed should push the start out. Only vintages that are drinkable now or soon were searched. Notes from the last 12 months count fully, notes 12 to 24 months old count half, and older notes are background only and do not count as recent.
 3. Critic windows and scores (Vinous, Wine Advocate, Burghound, Jancis Robinson and others), and the CellarTracker window. Older critic windows are a starting point, not the answer.
 4. Your own knowledge of the producer, appellation and vintage.
 
@@ -205,7 +205,7 @@ export const NOTES_TOOL = {
 } as const;
 
 export function readerSystem(year: number): string {
-  return `You gather recent tasting notes on wines for a cellar master. It is ${year}. Search the web for notes on the vintages listed, from the last two to three years. Start with CellarTracker, whose wine pages hold the most community notes: search for the producer, wine and vintage with the word cellartracker. Then try WineBerserkers, Reddit, merchants and critics. One search can cover several vintages. Do not search vintages that are not listed.
+  return `You gather recent tasting notes on wines for a cellar master. It is ${year}. Search the web for notes on the vintages listed, from the last two to three years. Start with CellarTracker, whose wine pages hold the most community notes: search for the producer, wine and vintage with the word cellartracker. Look hardest for the newest notes, from this year and last year; search results often show only older notes, so also try searching with the year in the query. Then try WineBerserkers, Reddit, merchants and critics. One search can cover several vintages. Do not search vintages that are not listed.
 
 For each vintage, record up to six of the most recent notes you actually found, each with its date, source, a maturity signal (too_young, approaching, ready, peak, declining, past_it, or unclear) and a gist of at most 25 words in your own words. Never invent a note; an empty list is fine. Then call record_notes once.`;
 }
