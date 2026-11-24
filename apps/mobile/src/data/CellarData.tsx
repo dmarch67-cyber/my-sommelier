@@ -32,10 +32,14 @@ type CellarData = {
   notes: TastingNote[];
   /** How mature recent notes say each vintage is (from the blended reviews), by vintage id. */
   maturity: Map<string, Maturity>;
+  /** "What critics and drinkers say" for each vintage, by vintage id. */
+  critics: Map<string, CriticsSay>;
   bestScores: Map<string, Score>;
   /** Fetches everything again. Screens keep showing the old data meanwhile. */
   reload: () => Promise<void>;
 };
+
+export type CriticsSay = { text: string; url: string | null };
 
 const Ctx = createContext<CellarData | null>(null);
 
@@ -92,32 +96,51 @@ const NOTE_COLUMNS =
 
 type Loaded = Omit<CellarData, 'bestScores' | 'reload'>;
 
-/** Optional extra: an older database without the reviews table just gives an empty map. */
-async function loadMaturity(): Promise<Map<string, Maturity>> {
+type Review = {
+  vintage_id: string;
+  maturity: Maturity | null;
+  critics_say?: string | null;
+  critics_url?: string | null;
+};
+
+/** Optional extra: an older database without the reviews table just gives empty maps. */
+async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
+  let rows: Review[] = [];
   try {
-    const rows = await fetchAll<{ vintage_id: string; maturity: Maturity | null }>(
+    rows = await fetchAll<Review>(
       'vintage_assessments',
-      'vintage_id,maturity',
+      'vintage_id,maturity,critics_say,critics_url',
       'vintage_id',
     );
-    return new Map(
-      rows.filter((r) => r.maturity).map((r) => [r.vintage_id, r.maturity as Maturity]),
-    );
   } catch {
-    return new Map();
+    try {
+      rows = await fetchAll<Review>('vintage_assessments', 'vintage_id,maturity', 'vintage_id');
+    } catch {
+      rows = [];
+    }
   }
+  return {
+    maturity: new Map(
+      rows.filter((r) => r.maturity).map((r) => [r.vintage_id, r.maturity as Maturity]),
+    ),
+    critics: new Map(
+      rows
+        .filter((r) => r.critics_say)
+        .map((r) => [r.vintage_id, { text: r.critics_say as string, url: r.critics_url ?? null }]),
+    ),
+  };
 }
 
 async function loadAll(): Promise<Loaded> {
-  const [cellars, inventory, scores, accolades, notes, maturity] = await Promise.all([
+  const [cellars, inventory, scores, accolades, notes, reviews] = await Promise.all([
     fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
     fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
     fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
     fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
     fetchAll<TastingNote>('tasting_notes', NOTE_COLUMNS, 'id'),
-    loadMaturity(),
+    loadReviews(),
   ]);
-  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes, maturity };
+  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes, ...reviews };
 }
 
 export function CellarDataProvider({ children }: { children: ReactNode }) {
@@ -130,6 +153,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     accolades: [],
     notes: [],
     maturity: new Map(),
+    critics: new Map(),
   });
 
   const reload = useCallback(async () => {

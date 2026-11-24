@@ -134,4 +134,36 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000da00';
 select pg_temp.check((select count(*) from public.vintage_assessments) = 3, 'members can read reviews');
 
+-- What critics say: only the service role writes it; members read it.
+create temp table blocked2 as select true as ok;
+grant all on blocked2 to authenticated, service_role;
+do $$
+begin
+  perform public.save_critics_say('[]'::jsonb);
+  update blocked2 set ok = false;
+exception when insufficient_privilege then
+  null;
+end;
+$$;
+select pg_temp.check((select ok from blocked2), 'app users cannot write what critics say');
+reset role;
+set local role service_role;
+select pg_temp.check(
+  public.save_critics_say(jsonb_build_array(
+    jsonb_build_object('vintage_id', (select r13 from ids), 'text', ' Silky and open. ',
+      'url', 'https://www.cellartracker.com/wine.asp?iWine=1'),
+    jsonb_build_object('vintage_id', (select r05 from ids), 'text', 'Fading.', 'url', 'javascript:x'),
+    jsonb_build_object('vintage_id', 'not-a-uuid', 'text', 'x'))) = 2,
+  'critics say saved for known vintages only');
+reset role;
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000da00';
+select pg_temp.check(
+  (select critics_say = 'Silky and open.' and critics_url like 'https://www.cellartracker.com/%'
+   from public.vintage_assessments where vintage_id = (select r13 from ids)),
+  'members read what critics say');
+select pg_temp.check(
+  (select critics_url is null from public.vintage_assessments where vintage_id = (select r05 from ids)),
+  'only https links are kept');
+
 rollback;
