@@ -47,7 +47,7 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000da00';
 
 select pg_temp.check(
-  public.invoice_email_address((select dan from ids)) = '{"address": null}'::jsonb,
+  public.invoice_email_address((select dan from ids)) ->> 'address' is null,
   'no address shown until the receiving domain is set');
 
 reset role;
@@ -110,5 +110,32 @@ select pg_temp.check_fails('delete from public.invoice_emails', 'the app cannot 
 
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000b0b0';
 select pg_temp.check((select count(*) from public.invoice_emails) = 0, 'the tester sees no invoices of Dan''s');
+
+-- Shared address (add@...): account found from the sender's sign-in email --
+
+reset role;
+insert into private.app_settings (key, value) values ('invoice_shared_address', 'add@mysommelier.net');
+set local role service_role;
+select pg_temp.check(
+  public.invoice_sender_account('DAN@example.test', array['add@mysommelier.net']) = (select dan from ids),
+  'mail from Dan''s sign-in email to the shared address finds his account');
+select pg_temp.check(
+  public.invoice_sender_account('dan@example.test', array['other@fenaetgra.resend.app']) is null,
+  'mail from Dan to some other address is not taken');
+select pg_temp.check(
+  public.invoice_sender_account('stranger@example.test', array['add@mysommelier.net']) is null,
+  'mail from a stranger finds no account');
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000da00';
+select pg_temp.check(
+  public.invoice_email_address((select dan from ids)) ->> 'shared' = 'add@mysommelier.net',
+  'the app shows the shared address');
+select pg_temp.check(
+  public.invoice_email_address((select dan from ids)) ->> 'sender' = 'dan@example.test',
+  'and the email it must be sent from');
+select pg_temp.check_fails(
+  'select public.invoice_sender_account(''dan@example.test'', array[''add@mysommelier.net''])',
+  'the app cannot look up accounts by email');
 
 rollback;

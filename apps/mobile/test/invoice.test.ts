@@ -7,6 +7,8 @@ import {
   htmlToText,
   inboxCodes,
   INVOICE_SCHEMA,
+  senderEmail,
+  senderVerified,
   userText,
   verifyWebhook,
 } from '../../../supabase/functions/receive-invoice/invoice.ts';
@@ -245,4 +247,22 @@ test('invoice lines match cellar wines by id or name, and keep a foreign currenc
   // Unticked lines are not added.
   lines[1].include = false;
   assert.equal(toAddLines(lines, 'EUR').length, 1);
+});
+
+// ---------- shared address: who sent it ----------
+
+test('the sender address is read from a From line', () => {
+  assert.equal(senderEmail('Dan March <Dan@Example.com>'), 'dan@example.com');
+  assert.equal(senderEmail('dan@example.com'), 'dan@example.com');
+  assert.equal(senderEmail('"Shop, Inc" <orders@shop.com>'), 'orders@shop.com');
+  assert.equal(senderEmail(null), null);
+  assert.equal(senderEmail('no address here'), null);
+});
+
+test('only mail signed by the sender (DKIM) or passing DMARC is trusted', () => {
+  assert.equal(senderVerified({ spf: 'pass', dkim: 'pass', dmarc: 'pass' }), true);
+  assert.equal(senderVerified({ spf: 'fail', dkim: 'pass', dmarc: 'fail' }), true);
+  assert.equal(senderVerified({ spf: 'pass', dkim: 'fail', dmarc: 'pass' }), true);
+  assert.equal(senderVerified({ spf: 'pass', dkim: 'fail', dmarc: 'fail' }), false);
+  assert.equal(senderVerified(undefined), false);
 });

@@ -23,6 +23,8 @@ import {
   INVOICE_SCHEMA,
   inboxCodes,
   MODEL,
+  senderEmail,
+  senderVerified,
   SYSTEM,
   userText,
   verifyWebhook,
@@ -107,11 +109,25 @@ async function fromResend(req: Request): Promise<Response> {
   ];
   const db = serviceDb();
   let accountId: string | null = null;
+  let matchedBy: 'code' | 'sender' = 'code';
   for (const code of inboxCodes(recipients)) {
     const { data } = await db.rpc('invoice_inbox_account', { p_code: code });
     if (data) {
       accountId = data as string;
       break;
+    }
+  }
+  // The shared address (add@...) has no code: find the account by who sent it.
+  // The sender is checked as genuine before the invoice is read.
+  const sender = senderEmail(d.from);
+  if (!accountId && sender) {
+    const { data } = await db.rpc('invoice_sender_account', {
+      p_email: sender,
+      p_recipients: recipients.map(senderEmail).filter(Boolean),
+    });
+    if (data) {
+      accountId = data as string;
+      matchedBy = 'sender';
     }
   }
   // Unknown address: answer 200 so Resend doesn't retry, and keep nothing.
@@ -134,6 +150,7 @@ async function fromResend(req: Request): Promise<Response> {
       {
         account_id: accountId,
         provider_email_id: emailId,
+        matched_by: matchedBy,
         from_address: typeof d.from === 'string' ? d.from.slice(0, 300) : null,
         subject: typeof d.subject === 'string' ? d.subject.slice(0, 500) : null,
         status: overLimit ? 'failed' : 'reading',
@@ -217,7 +234,7 @@ async function readInvoice(db: SupabaseClient, id: string): Promise<void> {
   try {
     const { data: inv } = await db
       .from('invoice_emails')
-      .select('id,account_id,provider_email_id,from_address,subject')
+      .select('id,account_id,provider_email_id,from_address,subject,matched_by')
       .eq('id', id)
       .single();
     if (!inv) return;
@@ -225,6 +242,11 @@ async function readInvoice(db: SupabaseClient, id: string): Promise<void> {
     if (!env('RESEND_API_KEY')) return void (await fail('The RESEND_API_KEY secret is missing.'));
 
     const email = await resendGet(`/emails/receiving/${inv.provider_email_id}`);
+    if (inv.matched_by === 'sender' && !senderVerified(email.authentication)) {
+      return void (await fail(
+        'Couldn’t confirm this came from your own email address, so it wasn’t read. Forward it to your private address instead.',
+      ));
+    }
     const list = await resendGet(`/emails/receiving/${inv.provider_email_id}/attachments`);
     const attachments = (Array.isArray(list.data) ? list.data : []) as Record<string, unknown>[];
 
