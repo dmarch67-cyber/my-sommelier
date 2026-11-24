@@ -240,3 +240,51 @@ test('sommelier answers keep only bottles that were offered', async () => {
   assert.equal(cleanSuggestion({ nope: true }, offered), null);
   assert.match(userText('lamb', offered), /v1 \| Ridge Monte Bello NV/);
 });
+
+test('a grape or country in another cellar gives "none here", not a guess', () => {
+  const paris = item({ wineName: 'Léoville Barton', cellarNames: ['Paris'] });
+  const chard = item({
+    wineName: 'Kistler Vine Hill',
+    colour: 'white',
+    body: 'medium',
+    grapes: ['Chardonnay'],
+    cellarNames: ['LA home'],
+  });
+  const barolo = item({ wineName: 'Giacosa Barolo', country: 'Italy', cellarNames: ['LA home'] });
+  const everywhere = [paris, chard, barolo];
+
+  const r = recommend([paris], {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('a chardonnay please'),
+    everywhere,
+  });
+  assert.equal(r.picks.length, 0);
+  assert.deepEqual(r.elsewhere, [{ word: 'chardonnay', cellars: [{ name: 'LA home', wines: 1 }] }]);
+
+  assert.deepEqual(parseAsk('something Italian').words, ['italy']);
+  assert.equal(parseAsk('something Italian').foods.length, 0);
+  const it = recommend(everywhere, {
+    year: YEAR,
+    colour: null,
+    body: null,
+    ask: parseAsk('Italian'),
+    everywhere,
+  });
+  assert.deepEqual(
+    it.picks.map((p) => p.item),
+    [barolo],
+  );
+
+  // Found in this cellar, but the Red chip hides it.
+  const red = recommend([chard, barolo], {
+    year: YEAR,
+    colour: 'red',
+    body: null,
+    ask: parseAsk('chardonnay'),
+    everywhere,
+  });
+  assert.equal(red.picks.length, 0);
+  assert.equal(red.elsewhere[0].word, 'chardonnay');
+});

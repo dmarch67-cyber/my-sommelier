@@ -113,7 +113,7 @@ const FOODS: { words: string[]; pairing: Omit<Pairing, 'dish'> }[] = [
     },
   },
   {
-    words: ['pizza', 'pasta', 'lasagna', 'bolognese', 'ragu', 'tomato', 'tomatoes', 'italian'],
+    words: ['pizza', 'pasta', 'lasagna', 'bolognese', 'ragu', 'tomato', 'tomatoes'],
     pairing: {
       colours: ['red'],
       bodies: ['medium'],
@@ -243,6 +243,25 @@ const COLOUR_WORDS: Record<string, StyleColour> = {
   champagne: 'sparkling',
 };
 
+/** "Italian" means wines from Italy: the word the cellar's data uses. */
+const PLACE_WORDS: Record<string, string> = {
+  italian: 'italy',
+  italia: 'italy',
+  french: 'france',
+  spanish: 'spain',
+  american: 'usa',
+  californian: 'california',
+  australian: 'australia',
+  german: 'germany',
+  austrian: 'austria',
+  portuguese: 'portugal',
+  argentinian: 'argentina',
+  argentine: 'argentina',
+  chilean: 'chile',
+  burgundian: 'burgundy',
+  tuscan: 'tuscany',
+};
+
 const BODY_WORDS: Record<string, StyleBody> = {
   light: 'light',
   lighter: 'light',
@@ -300,7 +319,7 @@ export function parseAsk(text: string): Ask {
       continue;
     }
     if (STOP.has(w) || w.length < 2) continue;
-    words.push(w);
+    words.push(PLACE_WORDS[w] ?? w);
   }
   return { colour, body, foods, words };
 }
@@ -368,6 +387,12 @@ export type TonightOptions = {
   colour: StyleColour | null;
   body: StyleBody | null;
   ask: Ask;
+  /**
+   * Every bottle in every cellar. A grape, place or name the ask mentions that
+   * is not in this cellar but is in another still narrows the list (to nothing
+   * here), and is reported in `elsewhere` rather than silently ignored.
+   */
+  everywhere?: CellarItem[];
   /** Latest maturity call per vintage, from the blended reviews. */
   maturity?: Map<string, Maturity>;
   /** The owner's own notes, for "you liked this before". */
@@ -390,6 +415,8 @@ export type TonightResult = {
   matchedWords: string[];
   /** Food was named but nothing suits it in the chosen colour; shown as a hint. */
   foodIgnored: boolean;
+  /** Words the ask named that are not among these bottles, with the cellars that do have them. */
+  elsewhere: { word: string; cellars: { name: string; wines: number }[] }[];
 };
 
 function haystack(i: CellarItem): string {
@@ -457,11 +484,30 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
   if (body) pool = pool.filter((i) => i.body === body);
 
   // Names, places and years in the ask narrow the list, if anything matches them.
+  // Words that match nothing anywhere ("recommend", "nice") are ignored. Words
+  // that match bottles in another cellar, or outside the chosen chips, still
+  // narrow the list here, so the answer is "none here" instead of guesses.
   const matchedWords: string[] = [];
+  const elsewhere: TonightResult['elsewhere'] = [];
   if (o.ask.words.length > 0) {
     const hays = new Map(pool.map((i) => [i.vintageId, haystack(i)]));
+    const others = (o.everywhere ?? []).filter((i) => i.bottles > 0);
     for (const w of o.ask.words) {
-      if (pool.some((i) => hays.get(i.vintageId)!.includes(w))) matchedWords.push(w);
+      if (pool.some((i) => hays.get(i.vintageId)!.includes(w))) {
+        matchedWords.push(w);
+        continue;
+      }
+      const there = others.filter((i) => haystack(i).includes(w));
+      if (there.length === 0) continue;
+      matchedWords.push(w);
+      const counts = new Map<string, number>();
+      for (const i of there) {
+        for (const c of i.cellarNames) counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+      elsewhere.push({
+        word: w,
+        cellars: [...counts].map(([name, wines]) => ({ name, wines })),
+      });
     }
     if (matchedWords.length > 0) {
       pool = pool.filter((i) => matchedWords.every((w) => hays.get(i.vintageId)!.includes(w)));
@@ -510,7 +556,7 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
       a.item.wineName.localeCompare(b.item.wineName) ||
       (a.item.vintage ?? 0) - (b.item.vintage ?? 0),
   );
-  return { picks, matchedWords, foodIgnored };
+  return { picks, matchedWords, foodIgnored, elsewhere };
 }
 
 /** "Full reds", "Whites", "Light", or "" when nothing is chosen. */

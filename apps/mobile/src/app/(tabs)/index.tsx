@@ -67,10 +67,23 @@ export default function TonightScreen() {
     () => (filter ? groupInventory(data.inventory, filter, data.bestScores) : []),
     [data.inventory, data.bestScores, filter],
   );
+  const everywhere = useMemo(
+    () => groupInventory(data.inventory, ALL_CELLARS, data.bestScores),
+    [data.inventory, data.bestScores],
+  );
   const ask = useMemo(() => parseAsk(text), [text]);
   const result = useMemo(
-    () => recommend(items, { year, colour, body, ask, maturity: data.maturity, notes: data.notes }),
-    [items, year, colour, body, ask, data.maturity, data.notes],
+    () =>
+      recommend(items, {
+        year,
+        colour,
+        body,
+        ask,
+        everywhere,
+        maturity: data.maturity,
+        notes: data.notes,
+      }),
+    [items, year, colour, body, ask, everywhere, data.maturity, data.notes],
   );
 
   // Back to the first page whenever the question changes.
@@ -90,6 +103,7 @@ export default function TonightScreen() {
         colour,
         body,
         ask: parseAsk(q),
+        everywhere,
         maturity: data.maturity,
         notes: data.notes,
       })
@@ -114,7 +128,7 @@ export default function TonightScreen() {
         );
       }
     },
-    [colour, body, filter, items, year, data.maturity, data.notes, sommelierOff],
+    [colour, body, filter, items, everywhere, year, data.maturity, data.notes, sommelierOff],
   );
 
   if (data.status === 'error') {
@@ -241,6 +255,29 @@ export default function TonightScreen() {
           </T>
         )}
 
+        {result.elsewhere.map((e) => (
+          <View key={e.word} style={styles.elsewhere}>
+            <T variant="body">{elsewhereText(e, cellarName, filter === ALL_CELLARS)}</T>
+            {(colour || body) &&
+            e.cellars.some((c) => c.name === cellarName || filter === ALL_CELLARS) ? (
+              <Button
+                kind="secondary"
+                label="Clear the filters"
+                onPress={() => {
+                  setColour(null);
+                  setBody(null);
+                }}
+              />
+            ) : filter !== ALL_CELLARS ? (
+              <Button
+                kind="secondary"
+                label="Look in all cellars"
+                onPress={() => setFilter(ALL_CELLARS)}
+              />
+            ) : null}
+          </View>
+        ))}
+
         {current && (
           <SommelierCard
             asked={current}
@@ -260,7 +297,7 @@ export default function TonightScreen() {
           </T>
         </View>
 
-        {list.length === 0 ? (
+        {list.length === 0 && result.elsewhere.length > 0 ? null : list.length === 0 ? (
           <View style={styles.empty}>
             <T variant="body" style={{ textAlign: 'center' }}>
               {emptyText(colour ?? ask.colour, cellarName, result.matchedWords.length > 0)}
@@ -306,6 +343,27 @@ export default function TonightScreen() {
 
 function cap(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+const WORD_NAMES: Record<string, string> = {
+  italy: 'Italian wine',
+  france: 'French wine',
+  spain: 'Spanish wine',
+  usa: 'American wine',
+  australia: 'Australian wine',
+  germany: 'German wine',
+};
+
+function elsewhereText(
+  e: { word: string; cellars: { name: string; wines: number }[] },
+  cellar: string,
+  all: boolean,
+): string {
+  const what = WORD_NAMES[e.word] ?? e.word[0].toUpperCase() + e.word.slice(1);
+  const list = e.cellars.map((c) => `${c.name} (${plural(c.wines, 'wine')})`).join(' and ');
+  const here = all || e.cellars.some((c) => c.name === cellar);
+  if (here) return `${what} is in your cellar (${list}), but not with the filters you picked.`;
+  return `No ${what} in ${cellar}. You have it in ${list}.`;
 }
 
 function emptyText(colour: StyleColour | null, cellar: string, named: boolean): string {
@@ -613,6 +671,12 @@ const styles = StyleSheet.create({
   readyRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xs },
   readyText: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 16 },
   more: { alignSelf: 'center', paddingVertical: space.sm },
+  elsewhere: {
+    padding: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    gap: space.md,
+  },
   empty: {
     padding: space.xl,
     borderRadius: radius.lg,
