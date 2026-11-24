@@ -166,4 +166,48 @@ select pg_temp.check(
   (select critics_url is null from public.vintage_assessments where vintage_id = (select r05 from ids)),
   'only https links are kept');
 
+-- Monthly refresh: nothing is due right after a review...
+reset role;
+set local role service_role;
+create temp table rc1 as select public.claim_refresh_assessment((select acct from ids), 150) as a;
+select pg_temp.check(
+  (select wine_id from public.wine_assessments where id = (select a from rc1)) is distinct from (select ridge from ids),
+  'a wine reviewed today is not refreshed');
+reset role;
+-- ...but a month later, a moved CellarTracker score makes it due.
+update public.vintages set cellartracker_id = '111' where id = (select r19 from ids);
+update public.wine_assessments set ct_fingerprint = public.ct_fingerprint(wine_id),
+  finished_at = now() - interval '29 days', started_at = now() - interval '29 days'
+where id = (select a from claim1);
+delete from public.wine_assessments where id <> (select a from claim1);
+-- Every other wine was reviewed today.
+insert into public.wine_assessments (account_id, wine_id, ok, started_at, finished_at)
+select account_id, id, true, now(), now() from public.wines where id <> (select ridge from ids);
+set local role service_role;
+create temp table rc2 as select public.claim_refresh_assessment((select acct from ids), 150) as a;
+select pg_temp.check(
+  (select wine_id from public.wine_assessments where id = (select a from rc2)) is distinct from (select ridge from ids),
+  'an unchanged score does not make a reviewed wine due');
+delete from public.wine_assessments where id = (select a from rc2);
+reset role;
+insert into public.scores (account_id, vintage_id, source, source_detail, raw_value, value_low, entered_via)
+values ((select acct from ids), (select r19 from ids), 'cellartracker',
+  'CellarTracker export: CellarTracker community', '93.4', 93.4, 'enrichment');
+set local role service_role;
+create temp table rc3 as select public.claim_refresh_assessment((select acct from ids), 150) as a;
+select pg_temp.check(
+  (select wine_id from public.wine_assessments where id = (select a from rc3)) = (select ridge from ids),
+  'a moved CellarTracker score makes a month-old review due');
+select pg_temp.check(public.claim_refresh_assessment((select acct from ids), 1) is null,
+  'the monthly cap stops further re-reviews');
+reset role;
+select public.add_bottles((select id from public.cellars limit 1),
+  '[{"wine_name": "New Arrival", "vintage": 2022, "quantity": 3}]'::jsonb);
+set local role service_role;
+create temp table rc4 as select public.claim_refresh_assessment((select acct from ids), 1) as a;
+select pg_temp.check(
+  (select w.name from public.wine_assessments a join public.wines w on w.id = a.wine_id
+   where a.id = (select a from rc4)) = 'New Arrival',
+  'a new wine is reviewed even over the cap');
+
 rollback;

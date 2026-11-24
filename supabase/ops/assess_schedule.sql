@@ -21,3 +21,33 @@ $$);
 -- To pause:   select cron.unschedule('assess-wines');
 -- Progress:   select count(*) filter (where ok), count(*) filter (where not ok and finished_at is not null)
 --             from public.wine_assessments;
+
+-- 3. Monthly refresh (after the first full run is done). Every 10 minutes,
+--    review at most one wine that is due: new, its CellarTracker community
+--    score has moved and its review is 28+ days old, or its review is 90+ days
+--    old. "cap" limits re-reviews to that many per 30 days (~5c each). When
+--    nothing is due the call returns at once and costs nothing.
+select cron.schedule('refresh-wines', '*/10 * * * *', $$
+  select net.http_post(
+    url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/assess-wines',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-assess-secret',
+      (select decrypted_secret from vault.decrypted_secrets where name = 'assess_secret')),
+    body := '{"mode": "refresh", "cap": 150}'::jsonb,
+    timeout_milliseconds := 300000);
+$$);
+
+-- 4. Rewrite "What critics say" for vintages whose review changed (Haiku, no
+--    web search, a fraction of a cent per wine).
+select cron.schedule('critics-say', '5,35 * * * *', $$
+  select net.http_post(
+    url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/critics-say',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-assess-secret',
+      (select decrypted_secret from vault.decrypted_secrets where name = 'assess_secret')),
+    body := '{"limit": 10}'::jsonb,
+    timeout_milliseconds := 150000);
+$$);
+
+-- To pause:  select cron.unschedule('refresh-wines'); select cron.unschedule('critics-say');
+-- Cost so far this month:
+--   select count(*), sum((usage->>'searches')::int) from public.wine_assessments
+--   where ok and started_at > now() - interval '30 days';
