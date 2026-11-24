@@ -10,11 +10,7 @@ const icon =
 
 export const unstable_settings = { initialRouteName: 'index' };
 
-/**
- * Bottom tabs from the design brief: Tonight, Cellar, Add, Notes.
- * Stage 1 builds Cellar (and the Wine page), so the app opens on Cellar for
- * now; Tonight becomes the home screen once it is built.
- */
+/** Bottom tabs from the design brief: Tonight (home), Cellar, Add, Notes. */
 export default function TabsLayout() {
   return (
     <Tabs
@@ -32,8 +28,8 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: colors.background },
       }}
     >
-      <Tabs.Screen name="tonight" options={{ title: 'Tonight', tabBarIcon: icon('glass') }} />
-      <Tabs.Screen name="index" options={{ title: 'Cellar', tabBarIcon: icon('cellar') }} />
+      <Tabs.Screen name="index" options={{ title: 'Tonight', tabBarIcon: icon('glass') }} />
+      <Tabs.Screen name="cellar" options={{ title: 'Cellar', tabBarIcon: icon('cellar') }} />
       <Tabs.Screen name="add" options={{ title: 'Add', tabBarIcon: icon('plus') }} />
       <Tabs.Screen name="notes" options={{ title: 'Notes', tabBarIcon: icon('note') }} />
     </Tabs>

@@ -1,52 +1,120 @@
 import { router } from 'expo-router';
-import { memo, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Icon } from '../../components/Icon';
 import { LabelArt } from '../../components/LabelArt';
 import { RipenessBar } from '../../components/RipenessBar';
-import { SearchBar } from '../../components/SearchBar';
 import { Button, Chip, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
 import { useLastCellar } from '../../data/lastCellar';
-import { useAuth } from '../../lib/auth';
+import { askSommelier, SuggestError, type Suggestion } from '../../data/suggest';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
+import { useVoiceInput } from '../../lib/voice';
+import { ALL_CELLARS, groupInventory, plural, ripeness, type CellarItem } from '../../logic/cellar';
 import {
-  ALL_CELLARS,
-  countsLine,
-  groupInventory,
-  placeLine,
-  ripeness,
-  search,
-  sortItems,
-  totals,
-  type CellarItem,
-  type SortKey,
-} from '../../logic/cellar';
+  BODY_CHIPS,
+  COLOUR_CHIPS,
+  parseAsk,
+  recommend,
+  styleLine,
+  toCandidate,
+  type Pick,
+  type ReadyState,
+  type StyleBody,
+  type StyleColour,
+} from '../../logic/tonight';
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: 'ready', label: 'Ready to drink' },
-  { key: 'region', label: 'Region' },
-  { key: 'score', label: 'Score' },
-];
+const PAGE = 8;
+/** Bottles offered to the sommelier per ask: the best matches first. */
+const SOMMELIER_CANDIDATES = 60;
 
-export default function CellarScreen() {
+const READY_COLOR: Record<ReadyState, string> = {
+  peak: colors.accent,
+  ready: colors.accent,
+  soon: '#9A4410',
+  past: '#8A6D3B',
+  unknown: colors.textMuted,
+};
+
+type Asked =
+  | { state: 'idle' }
+  | { state: 'asking'; key: string; ask: string }
+  | { state: 'done'; key: string; ask: string; suggestion: Suggestion }
+  | { state: 'error'; key: string; message: string };
+
+export default function TonightScreen() {
   const data = useCellarData();
-  const { signOut } = useAuth();
   const [filter, setFilter] = useLastCellar(data.cellars.map((c) => c.id));
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<SortKey>('ready');
+  const [text, setText] = useState('');
+  const [colour, setColour] = useState<StyleColour | null>(null);
+  const [body, setBody] = useState<StyleBody | null>(null);
+  const [shown, setShown] = useState(PAGE);
+  const [picker, setPicker] = useState(false);
+  const [asked, setAsked] = useState<Asked>({ state: 'idle' });
+  const [sommelierOff, setSommelierOff] = useState(false);
   const year = new Date().getFullYear();
-  const showAll = filter === ALL_CELLARS;
 
-  const inCellar = useMemo(
+  const items = useMemo(
     () => (filter ? groupInventory(data.inventory, filter, data.bestScores) : []),
     [data.inventory, data.bestScores, filter],
   );
-  const sum = useMemo(() => totals(inCellar), [inCellar]);
-  const shown = useMemo(
-    () => sortItems(search(inCellar, query), sort, year),
-    [inCellar, query, sort, year],
+  const ask = useMemo(() => parseAsk(text), [text]);
+  const result = useMemo(
+    () => recommend(items, { year, colour, body, ask, maturity: data.maturity, notes: data.notes }),
+    [items, year, colour, body, ask, data.maturity, data.notes],
+  );
+
+  // Back to the first page whenever the question changes.
+  useEffect(() => setShown(PAGE), [text, colour, body, filter]);
+
+  // The sommelier's answer belongs to one question in one cellar with one set of chips.
+  const askKey = `${text.trim()}|${colour}|${body}|${filter}`;
+  const current = asked.state !== 'idle' && asked.key === askKey ? asked : null;
+
+  const askNow = useCallback(
+    async (question: string) => {
+      const q = question.trim();
+      if (!q || sommelierOff) return;
+      const key = `${q}|${colour}|${body}|${filter}`;
+      const candidates = recommend(items, {
+        year,
+        colour,
+        body,
+        ask: parseAsk(q),
+        maturity: data.maturity,
+        notes: data.notes,
+      })
+        .picks.slice(0, SOMMELIER_CANDIDATES)
+        .map(toCandidate);
+      if (candidates.length === 0) return;
+      setAsked({ state: 'asking', key, ask: q });
+      try {
+        const suggestion = await askSommelier(q, candidates);
+        setAsked((a) =>
+          a.state === 'asking' && a.key === key ? { state: 'done', key, ask: q, suggestion } : a,
+        );
+      } catch (e) {
+        if (e instanceof SuggestError && e.unavailable) {
+          setSommelierOff(true);
+          setAsked({ state: 'idle' });
+          return;
+        }
+        const message = e instanceof Error ? e.message : 'The sommelier isn’t available right now.';
+        setAsked((a) =>
+          a.state === 'asking' && a.key === key ? { state: 'error', key, message } : a,
+        );
+      }
+    },
+    [colour, body, filter, items, year, data.maturity, data.notes, sommelierOff],
   );
 
   if (data.status === 'error') {
@@ -73,153 +141,387 @@ export default function CellarScreen() {
     );
   }
 
-  const header = (
-    <View style={styles.header}>
-      <View style={styles.titleRow}>
-        <T variant="title">Cellar</T>
-        <Pressable onPress={signOut} hitSlop={10} accessibilityRole="button">
-          <T variant="caption">Sign out</T>
-        </Pressable>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-      >
-        {data.cellars.map((c) => (
-          <Chip
-            key={c.id}
-            label={c.name}
-            selected={filter === c.id}
-            onPress={() => setFilter(c.id)}
-          />
-        ))}
-        <Chip
-          label="All"
-          selected={showAll}
-          onPress={() => setFilter(ALL_CELLARS)}
-          accessibilityLabel="All cellars"
-        />
-      </ScrollView>
-
-      <View style={styles.stats}>
-        <Stat value={sum.bottles} label="bottles" />
-        <Stat value={sum.magnums} label="magnums" />
-        <Stat value={sum.onOrder} label="on order" />
-      </View>
-
-      <SearchBar value={query} onChange={setQuery} placeholder="Search wine, region, year" />
-
-      <View style={styles.sortRow}>
-        <T variant="caption">
-          {query
-            ? `${shown.length} of ${sum.wines} wines`
-            : `${sum.wines.toLocaleString('en-US')} wines`}
-        </T>
-        <View style={styles.sorts}>
-          {SORTS.map((s) => (
-            <Pressable
-              key={s.key}
-              onPress={() => setSort(s.key)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: sort === s.key }}
-              hitSlop={6}
-              style={[styles.sort, sort === s.key && styles.sortOn]}
-            >
-              <T
-                variant="caption"
-                style={[styles.sortText, sort === s.key && { color: colors.text }]}
-              >
-                {s.label}
-              </T>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-    </View>
-  );
+  const cellarName =
+    filter === ALL_CELLARS
+      ? 'All cellars'
+      : (data.cellars.find((c) => c.id === filter)?.name ?? 'All cellars');
+  const style = styleLine(colour ?? ask.colour, body ?? ask.body);
+  const byId = new Map(items.map((i) => [i.vintageId, i]));
+  const sommelierPicks =
+    current?.state === 'done'
+      ? current.suggestion.picks
+          .map((p) => ({ item: byId.get(p.id), why: p.why }))
+          .filter((p): p is { item: CellarItem; why: string } => !!p.item)
+      : [];
+  const readyById = new Map(result.picks.map((p) => [p.item.vintageId, p]));
+  const list = result.picks.slice(0, shown);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <FlatList
-        data={shown}
-        keyExtractor={(i) => i.vintageId}
-        ListHeaderComponent={header}
-        renderItem={({ item }) => <WineRow item={item} year={year} showCellars={showAll} />}
-        ItemSeparatorComponent={Separator}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <T variant="caption">
-              {query ? `Nothing matches “${query}”.` : 'No bottles in this cellar yet.'}
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        <View style={styles.titleRow}>
+          <T variant="title">Tonight</T>
+          <Pressable
+            onPress={() => setPicker((p) => !p)}
+            accessibilityRole="button"
+            accessibilityLabel={`Cellar: ${cellarName}. Change cellar`}
+            style={styles.cellarButton}
+          >
+            <Icon name="cellar" size={16} color={colors.text} />
+            <T variant="bodyStrong" style={{ fontSize: 14 }}>
+              {cellarName}
             </T>
+            <View style={{ transform: [{ rotate: picker ? '-90deg' : '90deg' }] }}>
+              <Icon name="chevron" size={14} color={colors.textMuted} />
+            </View>
+          </Pressable>
+        </View>
+
+        {picker && (
+          <View style={styles.pickerRow}>
+            {data.cellars.map((c) => (
+              <Chip
+                key={c.id}
+                label={c.name}
+                selected={filter === c.id}
+                onPress={() => {
+                  setFilter(c.id);
+                  setPicker(false);
+                }}
+              />
+            ))}
+            <Chip
+              label="All"
+              selected={filter === ALL_CELLARS}
+              accessibilityLabel="All cellars"
+              onPress={() => {
+                setFilter(ALL_CELLARS);
+                setPicker(false);
+              }}
+            />
           </View>
-        }
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        initialNumToRender={20}
-        windowSize={11}
-      />
+        )}
+
+        <AskBar
+          value={text}
+          onChange={setText}
+          onAsk={askNow}
+          canAsk={!sommelierOff}
+          answered={current !== null}
+        />
+
+        <View style={styles.chipRows}>
+          <View style={styles.chips}>
+            {COLOUR_CHIPS.map((c) => (
+              <Chip
+                key={c.key}
+                label={c.label}
+                selected={colour === c.key}
+                onPress={() => setColour(colour === c.key ? null : c.key)}
+              />
+            ))}
+          </View>
+          <View style={styles.chips}>
+            {BODY_CHIPS.map((b) => (
+              <Chip
+                key={b.key}
+                label={b.label}
+                selected={body === b.key}
+                onPress={() => setBody(body === b.key ? null : b.key)}
+              />
+            ))}
+          </View>
+        </View>
+
+        {ask.foods.length > 0 && (
+          <T variant="caption">
+            {result.foodIgnored
+              ? `${cap(ask.foods.map((f) => f.dish).join(' and '))} usually suits another colour, so these are simply the best ready ${style ? style.toLowerCase() : 'wines'}.`
+              : `Chosen to go with ${ask.foods.map((f) => f.dish).join(' and ')}.`}
+          </T>
+        )}
+
+        {current && (
+          <SommelierCard
+            asked={current}
+            picks={sommelierPicks}
+            readyById={readyById}
+            year={year}
+            onRetry={() => askNow(text)}
+          />
+        )}
+
+        <View style={styles.sectionHead}>
+          <T variant="heading" style={{ fontSize: 18 }}>
+            Drinking best now
+          </T>
+          <T variant="caption" numberOfLines={1} style={{ flexShrink: 1, textAlign: 'right' }}>
+            {[style, cellarName].filter(Boolean).join(' · ')}
+          </T>
+        </View>
+
+        {list.length === 0 ? (
+          <View style={styles.empty}>
+            <T variant="body" style={{ textAlign: 'center' }}>
+              {emptyText(colour ?? ask.colour, cellarName, result.matchedWords.length > 0)}
+            </T>
+            {filter !== ALL_CELLARS && (
+              <Button
+                kind="secondary"
+                label="Look in all cellars"
+                onPress={() => setFilter(ALL_CELLARS)}
+                style={{ marginTop: space.md }}
+              />
+            )}
+          </View>
+        ) : (
+          <View style={styles.cards}>
+            {list.map((p) => (
+              <PickCard
+                key={p.item.vintageId}
+                pick={p}
+                year={year}
+                showCellars={filter === ALL_CELLARS}
+              />
+            ))}
+          </View>
+        )}
+
+        {result.picks.length > shown && (
+          <Pressable
+            onPress={() => setShown((s) => s + PAGE)}
+            accessibilityRole="button"
+            hitSlop={6}
+            style={styles.more}
+          >
+            <T variant="bodyStrong" style={{ color: colors.accent }}>
+              Show more ({plural(result.picks.length - shown, 'more wine')})
+            </T>
+          </Pressable>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+function cap(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+function emptyText(colour: StyleColour | null, cellar: string, named: boolean): string {
+  if (named) return `Nothing ready to drink in ${cellar} matches that.`;
+  const c = COLOUR_CHIPS.find((x) => x.key === colour);
+  if (c) return `No ${c.plural} ready to drink in ${cellar}.`;
+  return `Nothing ready to drink in ${cellar} with these choices.`;
+}
+
+/** The ask box: type or speak what you're eating or in the mood for. */
+function AskBar({
+  value,
+  onChange,
+  onAsk,
+  canAsk,
+  answered,
+}: {
+  value: string;
+  onChange: (t: string) => void;
+  onAsk: (t: string) => void;
+  canAsk: boolean;
+  /** The sommelier already has (or is working on) this question. */
+  answered: boolean;
+}) {
+  const latest = useRef(value);
+  latest.current = value;
+  const voice = useVoiceInput(onChange);
+  const wasListening = useRef(false);
+
+  // When speaking stops, ask straight away (no need to press anything).
+  useEffect(() => {
+    if (wasListening.current && !voice.listening && latest.current.trim()) onAsk(latest.current);
+    wasListening.current = voice.listening;
+  }, [voice.listening, onAsk]);
+
+  useEffect(() => {
+    if (!voice.message) return;
+    const t = setTimeout(voice.clearMessage, 4000);
+    return () => clearTimeout(t);
+  }, [voice.message, voice.clearMessage]);
+
   return (
-    <View style={styles.stat}>
-      <T style={styles.statValue}>{value.toLocaleString('en-US')}</T>
-      <T variant="caption">{label}</T>
+    <View style={{ gap: space.xs }}>
+      <View style={styles.askBox}>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          onSubmitEditing={() => onAsk(value)}
+          placeholder={voice.listening ? 'Listening…' : 'What are you eating, or in the mood for?'}
+          placeholderTextColor={colors.textFaint}
+          style={styles.askInput}
+          returnKeyType={canAsk ? 'send' : 'done'}
+          accessibilityLabel="Ask your sommelier"
+        />
+        {value.length > 0 && (
+          <Pressable
+            onPress={() => onChange('')}
+            hitSlop={10}
+            accessibilityLabel="Clear"
+            style={{ padding: space.xs }}
+          >
+            <Icon name="close" size={18} color={colors.textMuted} />
+          </Pressable>
+        )}
+        <Pressable
+          onPress={voice.toggle}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={voice.listening ? 'Stop listening' : 'Speak instead of typing'}
+          style={[styles.askMic, voice.listening && styles.askMicOn]}
+        >
+          <Icon name="mic" size={20} color={colors.onAccent} />
+        </Pressable>
+      </View>
+      {voice.message ? (
+        <T variant="caption" style={{ marginLeft: space.md }}>
+          {voice.message}
+        </T>
+      ) : value.trim() && canAsk && !answered ? (
+        <T variant="caption" style={{ marginLeft: space.md }}>
+          Press Enter to ask your sommelier.
+        </T>
+      ) : null}
     </View>
   );
 }
 
-function Separator() {
-  return <View style={styles.separator} />;
+function SommelierCard({
+  asked,
+  picks,
+  readyById,
+  year,
+  onRetry,
+}: {
+  asked: Exclude<Asked, { state: 'idle' }>;
+  picks: { item: CellarItem; why: string }[];
+  readyById: Map<string, Pick>;
+  year: number;
+  onRetry: () => void;
+}) {
+  return (
+    <View style={styles.sommelier}>
+      <T variant="overline" style={{ color: colors.accent }}>
+        Your sommelier suggests
+      </T>
+      {asked.state === 'asking' && (
+        <View style={styles.thinking}>
+          <ActivityIndicator color={colors.accent} />
+          <T variant="caption">Choosing from your bottles…</T>
+        </View>
+      )}
+      {asked.state === 'error' && (
+        <View style={{ gap: space.sm }}>
+          <T variant="caption">{asked.message}</T>
+          <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={6}>
+            <T variant="bodyStrong" style={{ color: colors.accent }}>
+              Try again
+            </T>
+          </Pressable>
+        </View>
+      )}
+      {asked.state === 'done' && (
+        <View style={{ gap: space.md }}>
+          {picks.length === 0 && (
+            <T variant="body">
+              {asked.suggestion.note ?? 'Nothing in this cellar fits that well.'}
+            </T>
+          )}
+          {picks.map(({ item, why }) => {
+            const ready = readyById.get(item.vintageId);
+            return (
+              <Pressable
+                key={item.vintageId}
+                onPress={() =>
+                  router.push({ pathname: '/wine/[id]', params: { id: item.vintageId } })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}`}
+                style={({ pressed }) => [styles.sommelierRow, pressed && { opacity: 0.7 }]}
+              >
+                <LabelArt name={item.wineName} vintage={item.vintage} colour={item.colour} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <T variant="bodyStrong" numberOfLines={2}>
+                    {item.vintage ?? 'NV'} {item.wineName}
+                  </T>
+                  <T variant="body" style={{ color: colors.text }}>
+                    {why}
+                  </T>
+                  <T variant="caption">
+                    {[
+                      ready?.ready.label,
+                      plural(item.bottles, 'bottle'),
+                      item.scoreText && `${item.scoreText} pts`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </T>
+                </View>
+              </Pressable>
+            );
+          })}
+          {picks.length > 0 && asked.suggestion.note ? (
+            <T variant="caption">{asked.suggestion.note}</T>
+          ) : null}
+        </View>
+      )}
+    </View>
+  );
 }
 
-const WineRow = memo(function WineRow({
-  item,
+const PickCard = memo(function PickCard({
+  pick,
   year,
   showCellars,
 }: {
-  item: CellarItem;
+  pick: Pick;
   year: number;
   showCellars: boolean;
 }) {
+  const { item, ready, reasons } = pick;
   const r = ripeness(item.drinkFrom, item.drinkTo, year);
-  const place = placeLine(item);
+  const facts = [
+    item.region ?? item.appellation ?? item.country,
+    plural(item.bottles, 'bottle'),
+    item.scoreText && `${item.scoreText} pts`,
+    showCellars ? item.cellarNames.join(', ') : null,
+  ].filter(Boolean);
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/wine/[id]', params: { id: item.vintageId } })}
       accessibilityRole="button"
-      accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}`}
-      style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface }]}
+      accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}, ${ready.label}`}
+      style={({ pressed }) => [styles.card, pressed && { backgroundColor: colors.surface }]}
     >
       <LabelArt name={item.wineName} vintage={item.vintage} colour={item.colour} />
-      <View style={styles.rowBody}>
+      <View style={styles.cardBody}>
         <T variant="bodyStrong" numberOfLines={2}>
-          {item.wineName} <T style={styles.vintage}>{item.vintage ?? 'NV'}</T>
+          {item.vintage ?? 'NV'} {item.wineName}
         </T>
-        {place ? (
-          <T variant="caption" numberOfLines={1}>
-            {place}
+        <T variant="caption" numberOfLines={1}>
+          {facts.join(' · ')}
+        </T>
+        <View style={styles.readyRow}>
+          {r.state !== 'unknown' && (
+            <View style={{ flex: 1, maxWidth: 160 }}>
+              <RipenessBar r={r} compact />
+            </View>
+          )}
+          <T style={[styles.readyText, { color: READY_COLOR[ready.state] }]}>{ready.label}</T>
+        </View>
+        {reasons.length > 0 && (
+          <T variant="caption" style={{ color: colors.text }}>
+            {reasons.join(' · ')}
           </T>
-        ) : null}
-        <T variant="caption" style={{ color: colors.text }}>
-          {countsLine(item)}
-          {showCellars ? `  ·  ${item.cellarNames.join(', ')}` : ''}
-        </T>
-        {r.state !== 'unknown' && (
-          <View style={{ marginTop: space.xs, maxWidth: 180 }}>
-            <RipenessBar r={r} compact />
-          </View>
         )}
       </View>
-      {item.scoreText ? (
-        <View style={styles.score}>
-          <T style={styles.scoreText}>{item.scoreText}</T>
-        </View>
-      ) : null}
     </Pressable>
   );
 });
@@ -233,56 +535,88 @@ const styles = StyleSheet.create({
     gap: space.sm,
     padding: space.xl,
   },
-  list: {
+  page: {
     width: '100%',
     maxWidth: MAX_CONTENT_WIDTH,
     alignSelf: 'center',
+    padding: space.lg,
     paddingBottom: space.xxl,
+    gap: space.lg,
   },
-  header: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: space.lg },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  chips: { gap: space.sm },
-  stats: { flexDirection: 'row', gap: space.sm },
-  stat: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    paddingVertical: space.md,
+  cellarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 40,
     paddingHorizontal: space.md,
-  },
-  statValue: { fontFamily: fonts.bold, fontSize: 22, lineHeight: 28 },
-  sortRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: space.sm,
-    marginBottom: space.sm,
-  },
-  sorts: { flexDirection: 'row', gap: space.xs },
-  sort: { paddingHorizontal: space.sm, paddingVertical: 6, borderRadius: radius.pill },
-  sortOn: { backgroundColor: colors.surface },
-  sortText: { fontFamily: fonts.medium },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingHorizontal: space.lg,
-    paddingVertical: space.md,
-    minHeight: 72,
-  },
-  rowBody: { flex: 1, gap: 2 },
-  vintage: { fontFamily: fonts.regular, color: colors.textMuted, fontSize: 15 },
-  score: {
-    minWidth: 44,
-    paddingHorizontal: space.sm,
-    height: 30,
     borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: -space.sm },
+  askBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 54,
+    paddingLeft: space.lg,
+    paddingRight: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+  },
+  askInput: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    color: colors.text,
+    paddingVertical: space.md,
+    outlineStyle: 'none',
+  } as object,
+  askMic: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scoreText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.accent },
-  separator: { height: 1, backgroundColor: colors.border, marginLeft: space.lg + 48 + space.md },
-  empty: { padding: space.xxl, alignItems: 'center' },
+  askMicOn: { backgroundColor: colors.text },
+  chipRows: { gap: space.sm },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  sommelier: {
+    borderRadius: radius.lg,
+    backgroundColor: colors.accentSoft,
+    padding: space.lg,
+    gap: space.md,
+  },
+  thinking: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  sommelierRow: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
+  sectionHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: space.md,
+  },
+  cards: { gap: space.md },
+  card: {
+    flexDirection: 'row',
+    gap: space.md,
+    padding: space.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  cardBody: { flex: 1, gap: 3, minWidth: 0 },
+  readyRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.xs },
+  readyText: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 16 },
+  more: { alignSelf: 'center', paddingVertical: space.sm },
+  empty: {
+    padding: space.xl,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+  },
 });
