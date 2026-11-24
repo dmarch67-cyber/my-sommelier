@@ -67,8 +67,8 @@ const cap = (s: string | null | undefined) =>
 
 export const BOTTLE_COLUMNS: XlsxSheet['columns'] = [
   { header: 'Cellar', width: 12 },
-  { header: 'Wine', width: 44 },
   { header: 'Producer', width: 24 },
+  { header: 'Wine', width: 44 },
   { header: 'Vintage', width: 9, format: 'text' },
   { header: 'Colour', width: 9 },
   { header: 'Country', width: 11 },
@@ -150,8 +150,8 @@ export function buildExport(input: ExportInput): ExportResult {
     const maturity = input.maturity.get(r.vintage_id);
     return [
       r.cellar_name,
-      r.wine_name,
       r.producer,
+      r.wine_name,
       r.vintage == null ? 'NV' : String(r.vintage),
       cap(r.colour),
       r.country,

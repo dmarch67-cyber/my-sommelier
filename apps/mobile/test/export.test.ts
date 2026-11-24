@@ -223,15 +223,17 @@ test('the file opens in a real spreadsheet library with the same numbers', async
   assert.equal(ws.getCell('A1').font?.bold, true);
   assert.equal(ws.getCell('N2').value, 3);
   assert.equal(ws.getCell('P2').numFmt, '#,##0.00');
-  assert.equal(ws.getCell('B4').value, 'Zzz & <Test> "Quote"');
+  assert.equal(ws.getCell('C4').value, 'Zzz & <Test> "Quote"');
   assert.equal(ws.getCell('D4').value, 'NV');
   assert.equal(ws.views[0].state, 'frozen');
   const sum = wb.getWorksheet('Summary')!;
   assert.equal(sum.getCell('C5').value, 16);
+  assert.equal(ws.getCell('B1').value, 'Producer');
+  assert.equal(ws.getCell('C1').value, 'Wine');
   // Our own reader (used by the delivery upload) reads it back too.
   const back = readXlsx(bytes);
-  assert.equal(back[0][1], 'Wine');
-  assert.equal(back[1][1], 'Ridge Monte Bello');
+  assert.equal(back[0][1], 'Producer');
+  assert.equal(back[1][2], 'Ridge Monte Bello');
 });
 
 test('column letters', () => {
