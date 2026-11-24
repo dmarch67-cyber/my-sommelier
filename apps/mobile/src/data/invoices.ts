@@ -41,22 +41,30 @@ export async function myAccountId(): Promise<string | null> {
   return (data?.[0]?.id as string | undefined) ?? null;
 }
 
+export type InvoiceAddress = {
+  /** The account's private address (works from any sender). */
+  address: string | null;
+  /** The easy shared address (add@mysommelier.net), when set up. */
+  shared: string | null;
+  /** The sign-in email: the shared address only accepts mail from it. */
+  sender: string | null;
+};
+
 /**
  * The private address to forward invoices to. Made the first time it's asked
  * for; fresh = make a new one (the old one stops working).
  * address is null while the email service isn't set up yet.
  */
-export async function invoiceAddress(
-  accountId: string,
-  fresh = false,
-): Promise<{ address: string | null }> {
+export async function invoiceAddress(accountId: string, fresh = false): Promise<InvoiceAddress> {
   const { data, error } = await supabase.rpc('invoice_email_address', {
     p_account_id: accountId,
     p_new: fresh,
   });
-  if (error && /invoice_email_address/.test(error.message)) return { address: null }; // database not updated yet
+  if (error && /invoice_email_address/.test(error.message))
+    return { address: null, shared: null, sender: null }; // database not updated yet
   fail(error);
-  return data as { address: string | null };
+  const d = (data ?? {}) as Partial<InvoiceAddress>;
+  return { address: d.address ?? null, shared: d.shared ?? null, sender: d.sender ?? null };
 }
 
 export async function listInvoices(): Promise<InvoiceEmail[]> {

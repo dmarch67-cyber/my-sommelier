@@ -6,7 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { useToast } from '../../components/Toast';
 import { Button, T } from '../../components/ui';
-import { invoiceAddress, listInvoices, myAccountId, type InvoiceEmail } from '../../data/invoices';
+import {
+  invoiceAddress,
+  listInvoices,
+  myAccountId,
+  type InvoiceAddress,
+  type InvoiceEmail,
+} from '../../data/invoices';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 import { plural } from '../../logic/cellar';
 
@@ -34,7 +40,8 @@ function when(iso: string): string {
 export default function InvoicesScreen() {
   const toast = useToast();
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [address, setAddress] = useState<string | null | undefined>(undefined);
+  const [info, setInfo] = useState<InvoiceAddress | undefined>(undefined);
+  const address = info?.address;
   const [invoices, setInvoices] = useState<InvoiceEmail[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmNew, setConfirmNew] = useState(false);
@@ -46,16 +53,16 @@ export default function InvoicesScreen() {
       if (!id) return;
       setAccountId(id);
       const [addr, list] = await Promise.all([
-        address === undefined ? invoiceAddress(id) : Promise.resolve({ address }),
+        info === undefined ? invoiceAddress(id) : Promise.resolve(info),
         listInvoices(),
       ]);
-      setAddress(addr.address);
+      setInfo(addr);
       setInvoices(list);
       setProblem(null);
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e));
     }
-  }, [accountId, address]);
+  }, [accountId, info]);
 
   useFocusEffect(
     useCallback(() => {
@@ -71,11 +78,11 @@ export default function InvoicesScreen() {
     return () => clearInterval(t);
   }, [reading, load]);
 
-  const copy = async () => {
-    if (!address) return;
+  const copy = async (value: string | null | undefined) => {
+    if (!value) return;
     try {
       if (Platform.OS === 'web' && navigator.clipboard) {
-        await navigator.clipboard.writeText(address);
+        await navigator.clipboard.writeText(value);
         toast('Address copied.');
       } else {
         toast('Press and hold the address to copy it.');
@@ -94,7 +101,7 @@ export default function InvoicesScreen() {
     setBusy(true);
     try {
       const res = await invoiceAddress(accountId, true);
-      setAddress(res.address);
+      setInfo(res);
       toast('New address made. The old one no longer works.');
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
@@ -117,26 +124,55 @@ export default function InvoicesScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <T variant="title">Email an invoice</T>
         <T variant="caption">
-          Forward a merchant’s invoice or order confirmation to your private address. The app reads
-          the email, or an attached PDF, photo or spreadsheet, and lists the bottles here for you to
+          Forward a merchant’s invoice or order confirmation to the address below. The app reads the
+          email, or an attached PDF, photo or spreadsheet, and lists the bottles here for you to
           check. Nothing is added until you confirm, and it only ever adds.
         </T>
 
+        {info?.shared ? (
+          <View style={styles.box}>
+            <T variant="overline">Send invoices to</T>
+            <T variant="heading" selectable style={{ color: colors.accent }}>
+              {info.shared}
+            </T>
+            <T variant="caption">
+              {info.sender
+                ? `Forward from ${info.sender}, the email you sign in with. Mail from other addresses isn’t accepted here; use your private address below for those.`
+                : 'Forward from the email you sign in with.'}
+            </T>
+            <View style={styles.row}>
+              <Button label="Copy address" onPress={() => copy(info.shared)} style={{ flex: 1 }} />
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.box}>
-          <T variant="overline">Your private address</T>
-          {address === undefined ? (
+          <T variant="overline">
+            {info?.shared ? 'Your private address (from any email)' : 'Your private address'}
+          </T>
+          {info === undefined ? (
             <T variant="caption">Loading…</T>
           ) : address ? (
             <>
-              <T variant="heading" selectable style={{ color: colors.accent }}>
+              <T
+                variant={info.shared ? 'bodyStrong' : 'heading'}
+                selectable
+                style={{ color: colors.accent }}
+              >
                 {address}
               </T>
               <T variant="caption">
-                Keep it private: anything sent here shows up below. Tip: save it as a contact named
-                “My Sommelier”.
+                {info.shared
+                  ? 'Works from any email address, for example a work account or a shop that sends straight to it. Keep it private.'
+                  : 'Keep it private: anything sent here shows up below. Tip: save it as a contact named “My Sommelier”.'}
               </T>
               <View style={styles.row}>
-                <Button label="Copy address" onPress={copy} style={{ flex: 1 }} />
+                <Button
+                  label="Copy address"
+                  kind={info.shared ? 'secondary' : 'primary'}
+                  onPress={() => copy(address)}
+                  style={{ flex: 1 }}
+                />
               </View>
               <Pressable onPress={makeNew} disabled={busy} hitSlop={6}>
                 <T variant="caption" style={{ color: colors.accent }}>

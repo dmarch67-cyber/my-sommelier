@@ -205,6 +205,24 @@ export function inboxCodes(addresses: unknown[]): string[] {
   return [...codes];
 }
 
+/** The bare address from a From value ("Dan <dan@x.com>" -> "dan@x.com"). */
+export function senderEmail(from: unknown): string | null {
+  if (typeof from !== 'string') return null;
+  const m = from.match(/<([^<>\s]+@[^<>\s]+)>/) ?? from.match(/([^\s<>"]+@[^\s<>"]+)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Mail to the shared address is only trusted when the email service says the
+ * sender's own mail server signed it (DKIM) or DMARC passed, so a stranger
+ * can't add invoices by faking the From line.
+ */
+export function senderVerified(auth: unknown): boolean {
+  if (!auth || typeof auth !== 'object') return false;
+  const a = auth as Record<string, unknown>;
+  return a.dkim === 'pass' || a.dmarc === 'pass';
+}
+
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
