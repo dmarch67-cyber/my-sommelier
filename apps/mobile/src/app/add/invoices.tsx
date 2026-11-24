@@ -137,7 +137,7 @@ export default function InvoicesScreen() {
             </T>
             <T variant="caption">
               {info.sender
-                ? `Forward from ${info.sender}, the email you sign in with. Mail from other addresses isn’t accepted here; use your private address below for those.`
+                ? `Forward from ${info.sender}, the email you sign in with. Mail from other addresses isn’t accepted.`
                 : 'Forward from the email you sign in with.'}
             </T>
             <View style={styles.row}>
@@ -146,48 +146,51 @@ export default function InvoicesScreen() {
           </View>
         ) : null}
 
-        <View style={styles.box}>
-          <T variant="overline">
-            {info?.shared ? 'Your private address (from any email)' : 'Your private address'}
-          </T>
-          {info === undefined ? (
-            <T variant="caption">Loading…</T>
-          ) : address ? (
-            <>
-              <T
-                variant={info.shared ? 'bodyStrong' : 'heading'}
-                selectable
-                style={{ color: colors.accent }}
-              >
-                {address}
-              </T>
-              <T variant="caption">
-                {info.shared
-                  ? 'Works from any email address, for example a work account or a shop that sends straight to it. Keep it private.'
-                  : 'Keep it private: anything sent here shows up below. Tip: save it as a contact named “My Sommelier”.'}
-              </T>
-              <View style={styles.row}>
-                <Button
-                  label="Copy address"
-                  kind={info.shared ? 'secondary' : 'primary'}
-                  onPress={() => copy(address)}
-                  style={{ flex: 1 }}
-                />
-              </View>
-              <Pressable onPress={makeNew} disabled={busy} hitSlop={6}>
-                <T variant="caption" style={{ color: colors.accent }}>
-                  {confirmNew
-                    ? 'Tap again to make a new address (the old one will stop working)'
-                    : 'Make a new address'}
-                </T>
-              </Pressable>
-            </>
-          ) : (
-            <T variant="body">
-              Email setup isn’t finished yet. Once it is, your address appears here.
+        {/* The private code address still works, but is only shown until the shared one is set up. */}
+        {info?.shared ? null : (
+          <View style={styles.box}>
+            <T variant="overline">
+              {info?.shared ? 'Your private address (from any email)' : 'Your private address'}
             </T>
-          )}
-        </View>
+            {info === undefined ? (
+              <T variant="caption">Loading…</T>
+            ) : address ? (
+              <>
+                <T
+                  variant={info.shared ? 'bodyStrong' : 'heading'}
+                  selectable
+                  style={{ color: colors.accent }}
+                >
+                  {address}
+                </T>
+                <T variant="caption">
+                  {info.shared
+                    ? 'Works from any email address, for example a work account or a shop that sends straight to it. Keep it private.'
+                    : 'Keep it private: anything sent here shows up below. Tip: save it as a contact named “My Sommelier”.'}
+                </T>
+                <View style={styles.row}>
+                  <Button
+                    label="Copy address"
+                    kind={info.shared ? 'secondary' : 'primary'}
+                    onPress={() => copy(address)}
+                    style={{ flex: 1 }}
+                  />
+                </View>
+                <Pressable onPress={makeNew} disabled={busy} hitSlop={6}>
+                  <T variant="caption" style={{ color: colors.accent }}>
+                    {confirmNew
+                      ? 'Tap again to make a new address (the old one will stop working)'
+                      : 'Make a new address'}
+                  </T>
+                </Pressable>
+              </>
+            ) : (
+              <T variant="body">
+                Email setup isn’t finished yet. Once it is, your address appears here.
+              </T>
+            )}
+          </View>
+        )}
 
         {problem ? (
           <T variant="body" style={{ color: colors.danger }}>
