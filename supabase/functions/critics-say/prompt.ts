@@ -134,12 +134,27 @@ export function searchUrl(name: string, year: number | null): string {
   return `https://www.cellartracker.com/list.asp?Table=List&iUserOverride=0&szSearch=${encodeURIComponent(q)}`;
 }
 
+/** The CellarTracker page for a CellarTracker wine id (iWine), or null if it is not one. */
+export function wineUrl(ctId: string | null | undefined): string | null {
+  return ctId && /^\d+$/.test(ctId.trim())
+    ? `https://www.cellartracker.com/wine.asp?iWine=${ctId.trim()}`
+    : null;
+}
+
 /**
- * The CellarTracker page for this exact vintage, when the review read it:
- * its title starts with the year and closely matches the wine's name.
- * Otherwise a CellarTracker search for the wine and vintage.
+ * The CellarTracker page for this exact vintage: first the id from the owner's
+ * own CellarTracker export, then a page the review read whose title
+ * starts with the year and closely matches the wine's name. Otherwise a
+ * CellarTracker search for the wine and vintage.
  */
-export function notesUrl(name: string, year: number | null, sources: Source[]): string {
+export function notesUrl(
+  name: string,
+  year: number | null,
+  sources: Source[],
+  ctId?: string | null,
+): string {
+  const own = wineUrl(ctId);
+  if (own) return own;
   if (year != null) {
     const want = [...new Set(words(name))];
     let best: { url: string; score: number } | null = null;
