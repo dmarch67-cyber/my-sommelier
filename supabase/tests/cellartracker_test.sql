@@ -63,6 +63,9 @@ select pg_temp.check(
   (select drink_from = 2024 and drink_window_source = 'owner' from public.vintages where id = (select r13 from ids)),
   'owner window kept');
 select pg_temp.check(
+  (select ct_drink_from = 2020 and ct_drink_to = 2040 from public.vintages where id = (select r13 from ids)),
+  'CellarTracker''s own window is kept beside the owner''s');
+select pg_temp.check(
   (select colour = 'red' and grapes = '{Cabernet Sauvignon}' from public.wines limit 1),
   'CellarTracker colour and grapes replace Claude guesses');
 select pg_temp.check(
