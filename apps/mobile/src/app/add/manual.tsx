@@ -14,6 +14,13 @@ import { addBottles, undoEvents } from '../../data/writes';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
 import { findWines, parseSpokenAdd, spokenCellar, type WineMatch } from '../../logic/adding';
 import { ALL_CELLARS, formatPrice, plural } from '../../logic/cellar';
+import {
+  autoFill,
+  learnPlaces,
+  lookupPlace,
+  tidyPlace,
+  type PlaceFields,
+} from '../../logic/places';
 
 const SIZES = [
   { ml: 750, label: 'Bottle' },
@@ -27,6 +34,10 @@ function titleCase(s: string): string {
 
 type Done = { eventIds: string[]; summary: string };
 
+type NewWine = PlaceFields & { name: string; appellation: string };
+
+const EMPTY_PLACE: PlaceFields = { subRegion: '', region: '', country: '' };
+
 export default function AddManualScreen() {
   const params = useLocalSearchParams<{
     wineId?: string;
@@ -35,6 +46,7 @@ export default function AddManualScreen() {
     name?: string;
     country?: string;
     region?: string;
+    subRegion?: string;
     appellation?: string;
     size?: string;
     from?: string;
@@ -47,12 +59,11 @@ export default function AddManualScreen() {
   const [cellarId, setCellarId] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [wine, setWine] = useState<WineMatch | null>(null);
-  const [newWine, setNewWine] = useState<{
-    name: string;
-    country: string;
-    region: string;
-    appellation: string;
-  } | null>(null);
+  const [newWine, setNewWine] = useState<NewWine | null>(null);
+  // What the appellation filled in last, so a later change can replace it
+  // without overwriting anything typed by hand.
+  const autoPlace = useRef<PlaceFields>(EMPTY_PLACE);
+  const learned = useMemo(() => learnPlaces(data.inventory), [data.inventory]);
   const [vintage, setVintage] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [sizeMl, setSizeMl] = useState(750);
@@ -73,12 +84,21 @@ export default function AddManualScreen() {
   useEffect(() => {
     if (prefilled.current || params.wineId || !params.name) return;
     prefilled.current = true;
-    setNewWine({
+    const fromLabel: NewWine = {
       name: params.name,
       country: params.country ?? '',
       region: params.region ?? '',
+      subRegion: params.subRegion ?? '',
       appellation: params.appellation ?? '',
-    });
+    };
+    // Fill any gaps the label left (e.g. only "Pauillac" was printed).
+    const { fields, auto } = autoFill(
+      fromLabel,
+      EMPTY_PLACE,
+      lookupPlace(fromLabel.appellation, learned),
+    );
+    autoPlace.current = auto;
+    setNewWine({ ...fromLabel, ...fields });
     setVintage(params.vintage === 'NV' ? '' : (params.vintage ?? ''));
     const size = Number(params.size);
     if (SIZES.some((s) => s.ml === size)) setSizeMl(size);
@@ -87,7 +107,9 @@ export default function AddManualScreen() {
     params.name,
     params.country,
     params.region,
+    params.subRegion,
     params.appellation,
+    learned,
     params.vintage,
     params.size,
   ]);
@@ -151,6 +173,7 @@ export default function AddManualScreen() {
                   wine_name: name,
                   country: newWine?.country.trim() || null,
                   region: newWine?.region.trim() || null,
+                  sub_region: newWine?.subRegion.trim() || null,
                   appellation: newWine?.appellation.trim() || null,
                 }),
             vintage: year,
@@ -191,6 +214,29 @@ export default function AddManualScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onAppellation = (v: string) => {
+    if (!newWine) return;
+    const { fields, auto } = autoFill(newWine, autoPlace.current, lookupPlace(v, learned));
+    autoPlace.current = auto;
+    setNewWine({ ...newWine, ...fields, appellation: v });
+  };
+
+  const onPlaceBox = (box: keyof PlaceFields, v: string) => {
+    if (!newWine) return;
+    setNewWine({ ...newWine, [box]: v });
+  };
+
+  const onLeavePlaceBox = (box: keyof PlaceFields) => {
+    if (!newWine) return;
+    const fixed = tidyPlace(box, newWine, learned);
+    if (fixed) setNewWine({ ...newWine, ...fixed });
+  };
+
+  const startNewWine = (wineName: string) => {
+    autoPlace.current = EMPTY_PLACE;
+    setNewWine({ name: wineName, country: '', region: '', subRegion: '', appellation: '' });
   };
 
   const reset = () => {
@@ -295,18 +341,30 @@ export default function AddManualScreen() {
               onChange={(v) => setNewWine({ ...newWine, name: v })}
             />
             <VoiceField
-              label="Appellation or area (optional)"
+              label="Appellation (optional)"
               value={newWine.appellation}
-              onChange={(v) => setNewWine({ ...newWine, appellation: v })}
-              placeholder="e.g. Pauillac, Napa Valley"
+              onChange={onAppellation}
+              placeholder="e.g. Saint-Estèphe, Oakville"
+            />
+            <T variant="caption">
+              The rest fills in from the appellation. Change anything that's wrong.
+            </T>
+            <VoiceField
+              label="Sub-region"
+              value={newWine.subRegion}
+              onChange={(v) => onPlaceBox('subRegion', v)}
+              onBlur={() => onLeavePlaceBox('subRegion')}
+              placeholder="e.g. Médoc, Napa Valley"
+              voice={false}
             />
             <View style={{ flexDirection: 'row', gap: space.md }}>
               <View style={{ flex: 1 }}>
                 <VoiceField
                   label="Region"
                   value={newWine.region}
-                  onChange={(v) => setNewWine({ ...newWine, region: v })}
-                  placeholder="Bordeaux"
+                  onChange={(v) => onPlaceBox('region', v)}
+                  onBlur={() => onLeavePlaceBox('region')}
+                  placeholder="e.g. Bordeaux"
                   voice={false}
                 />
               </View>
@@ -314,8 +372,9 @@ export default function AddManualScreen() {
                 <VoiceField
                   label="Country"
                   value={newWine.country}
-                  onChange={(v) => setNewWine({ ...newWine, country: v })}
-                  placeholder="France"
+                  onChange={(v) => onPlaceBox('country', v)}
+                  onBlur={() => onLeavePlaceBox('country')}
+                  placeholder="e.g. France"
                   voice={false}
                 />
               </View>
@@ -352,14 +411,7 @@ export default function AddManualScreen() {
                   </Pressable>
                 ))}
                 <Pressable
-                  onPress={() =>
-                    setNewWine({
-                      name: titleCase(parsed.query),
-                      country: '',
-                      region: '',
-                      appellation: '',
-                    })
-                  }
+                  onPress={() => startNewWine(titleCase(parsed.query))}
                   accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.result,

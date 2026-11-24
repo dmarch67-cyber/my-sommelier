@@ -49,7 +49,7 @@ create temp table r1 as
 select public.add_bottles(
   (select la from t),
   '[{"wine_name": "Ridge Monte Bello", "vintage": 2019, "country": "USA", "region": "California",
-     "appellation": "Santa Cruz", "quantity": 6, "unit_price": 250, "score_raw": "97+",
+     "sub_region": "Central Coast", "appellation": "Santa Cruz Mountains", "quantity": 6, "unit_price": 250, "score_raw": "97+",
      "score_low": 97, "score_plus": true}]'::jsonb
 ) as res;
 
@@ -57,6 +57,9 @@ select pg_temp.check((select (res ->> 'new_wines')::int from r1) = 1, 'add_bottl
 select pg_temp.check(
   (select quantity from public.cellar_inventory where wine_name = 'Ridge Monte Bello') = 6,
   '6 bottles are in LA');
+select pg_temp.check(
+  (select sub_region from public.cellar_inventory where wine_name = 'Ridge Monte Bello') = 'Central Coast',
+  'new wine keeps its sub-region');
 select pg_temp.check(
   (select currency from public.holdings) = 'USD', 'price takes the cellar currency');
 select pg_temp.check(

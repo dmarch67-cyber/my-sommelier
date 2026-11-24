@@ -3,7 +3,7 @@
  * from, finding a wine from typed or spoken words, and reading a delivery
  * spreadsheet's rows. No React or Supabase, so it runs in Node tests.
  */
-import type { InventoryRow } from './cellar';
+import { placeLine, type InventoryRow } from './cellar.ts';
 
 // Drink one --------------------------------------------------------------------
 
@@ -97,7 +97,7 @@ export function findWines(rows: InventoryRow[], query: string, limit = 6): WineM
     let w = wines.get(r.wine_id);
     if (!w) {
       const name = foldName(r.wine_name);
-      const hay = `${name} ${foldName([r.appellation, r.region, r.country].filter(Boolean).join(' '))}`;
+      const hay = `${name} ${foldName([r.appellation, r.sub_region, r.region, r.country].filter(Boolean).join(' '))}`;
       if (!words.every((x) => hay.includes(x))) continue;
       const score =
         (name === words.join(' ') ? 100 : 0) +
@@ -106,7 +106,7 @@ export function findWines(rows: InventoryRow[], query: string, limit = 6): WineM
       w = {
         wineId: r.wine_id,
         name: r.wine_name,
-        place: [r.appellation, r.region, r.country].filter(Boolean).join(', '),
+        place: placeLine({ ...r, subRegion: r.sub_region }),
         country: r.country,
         region: r.region,
         appellation: r.appellation,

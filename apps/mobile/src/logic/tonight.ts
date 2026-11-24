@@ -12,7 +12,14 @@
  *  4. Preference: wines the owner rated well before.
  */
 
-import { fold, ripeness, type CellarItem, type Maturity, type TastingNote } from './cellar.ts';
+import {
+  fold,
+  placeLine,
+  ripeness,
+  type CellarItem,
+  type Maturity,
+  type TastingNote,
+} from './cellar.ts';
 
 export type StyleColour = 'red' | 'white' | 'rose' | 'sparkling';
 export type StyleBody = 'light' | 'medium' | 'full';
@@ -426,7 +433,16 @@ export type TonightResult = {
 
 function haystack(i: CellarItem): string {
   return fold(
-    [i.wineName, i.vintage ?? 'NV', i.producer, i.country, i.region, i.appellation, ...i.grapes]
+    [
+      i.wineName,
+      i.vintage ?? 'NV',
+      i.producer,
+      i.country,
+      i.region,
+      i.subRegion,
+      i.appellation,
+      ...i.grapes,
+    ]
       .filter(Boolean)
       .join(' '),
   );
@@ -624,7 +640,7 @@ export function toCandidate(p: Pick): {
     id: i.vintageId,
     name: i.wineName,
     vintage: i.vintage,
-    place: [i.appellation, i.region, i.country].filter(Boolean).join(', '),
+    place: placeLine(i),
     colour: i.colour,
     body: i.body,
     grapes: i.grapes,

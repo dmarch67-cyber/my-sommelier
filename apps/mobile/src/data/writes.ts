@@ -71,6 +71,7 @@ export type AddLine = {
   vintage: number | null;
   country?: string | null;
   region?: string | null;
+  sub_region?: string | null;
   appellation?: string | null;
   bottle_size_ml: number;
   quantity: number;

@@ -25,6 +25,8 @@ export type InventoryRow = {
   country: string | null;
   region: string | null;
   appellation: string | null;
+  /** Napa Valley, Médoc… (added after the first release, so may be missing). */
+  sub_region?: string | null;
   colour: string | null;
   vintage_id: string;
   vintage: number | null;
@@ -103,6 +105,7 @@ export type CellarItem = {
   vintage: number | null;
   country: string | null;
   region: string | null;
+  subRegion: string | null;
   appellation: string | null;
   colour: string | null;
   /** light / medium / full, when known. */
@@ -145,6 +148,7 @@ export function groupInventory(
         vintage: r.vintage,
         country: r.country,
         region: r.region,
+        subRegion: r.sub_region ?? null,
         appellation: r.appellation,
         colour: r.colour,
         body: r.body ?? null,
@@ -199,6 +203,7 @@ export function search(items: CellarItem[], query: string): CellarItem[] {
         i.vintage ?? 'NV',
         i.country,
         i.region,
+        i.subRegion,
         i.appellation,
         i.colour,
         ...i.cellarNames,
@@ -219,7 +224,7 @@ export function sortItems(items: CellarItem[], key: SortKey, year: number): Cell
     out.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || byName(a, b));
   } else if (key === 'region') {
     const place = (i: CellarItem) =>
-      [i.country ?? '~', i.region ?? '~', i.appellation ?? '~'].join('|');
+      [i.country ?? '~', i.region ?? '~', i.subRegion ?? '~', i.appellation ?? '~'].join('|');
     out.sort((a, b) => place(a).localeCompare(place(b)) || byName(a, b));
   } else {
     out.sort((a, b) => readyRank(a, year) - readyRank(b, year) || byName(a, b));
@@ -382,10 +387,11 @@ export function countsLine(i: Pick<CellarItem, 'bottles' | 'magnums' | 'onOrder'
 
 export function placeLine(i: {
   appellation: string | null;
+  subRegion?: string | null;
   region: string | null;
   country: string | null;
 }): string {
-  const parts = [i.appellation, i.region, i.country].filter(
+  const parts = [i.appellation, i.subRegion, i.region, i.country].filter(
     (p, idx, all): p is string => !!p && all.indexOf(p) === idx,
   );
   return parts.join(', ');

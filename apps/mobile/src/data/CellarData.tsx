@@ -81,6 +81,7 @@ const INVENTORY_COLUMNS = [
   'body',
   'grapes',
   'drink_window_source',
+  'sub_region',
 ].join(',');
 
 const SCORE_COLUMNS =

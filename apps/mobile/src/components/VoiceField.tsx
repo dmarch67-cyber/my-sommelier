@@ -20,6 +20,7 @@ export function VoiceField({
   voice = true,
   autoFocus,
   accessibilityLabel,
+  onBlur,
 }: {
   label?: string;
   value: string;
@@ -30,6 +31,8 @@ export function VoiceField({
   voice?: boolean;
   autoFocus?: boolean;
   accessibilityLabel?: string;
+  /** Called when you leave the box. */
+  onBlur?: () => void;
 }) {
   const base = useRef('');
   const mic = useVoiceInput((spoken) =>
@@ -55,6 +58,7 @@ export function VoiceField({
           multiline={multiline}
           keyboardType={keyboardType}
           autoFocus={autoFocus}
+          onBlur={onBlur}
           accessibilityLabel={accessibilityLabel ?? label ?? placeholder}
         />
         {voice && (
