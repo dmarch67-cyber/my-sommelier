@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -130,6 +130,21 @@ export default function TonightScreen() {
     },
     [colour, body, filter, items, everywhere, year, data.maturity, data.notes, sommelierOff],
   );
+
+  // A dish tapped on a Wine page arrives as ?ask=…: type it in and ask.
+  const { ask: askParam } = useLocalSearchParams<{ ask?: string }>();
+  const handledAsk = useRef<string | null>(null);
+  const ready = data.status === 'ready' && filter !== null && items.length > 0;
+  useEffect(() => {
+    const q = typeof askParam === 'string' ? askParam.trim() : '';
+    if (!q || !ready || handledAsk.current === q) return;
+    handledAsk.current = q;
+    setColour(null);
+    setBody(null);
+    setText(q);
+    askNow(q);
+    router.setParams({ ask: undefined });
+  }, [askParam, ready, askNow]);
 
   if (data.status === 'error') {
     return (

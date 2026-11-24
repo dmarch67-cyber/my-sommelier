@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { fillInFoodMatches } from './foodMatches';
 
 /**
  * First brings in facts from the owner's CellarTracker account (at most once
@@ -46,4 +47,6 @@ export async function fillInWines(
     if (changed > 0) await refresh().catch(() => undefined);
     running = false;
   }
+  // Then dishes for the Wine page, once grapes and style are known.
+  if (keepGoing()) await fillInFoodMatches(keepGoing);
 }

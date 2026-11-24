@@ -7,6 +7,7 @@ import { Stars } from '../../components/controls';
 import { Icon } from '../../components/Icon';
 import { LabelArt } from '../../components/LabelArt';
 import { RipenessBar } from '../../components/RipenessBar';
+import { FoodMatches } from '../../components/FoodMatches';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { formatDay } from '../../lib/format';
@@ -125,6 +126,11 @@ export default function WinePage() {
       scores,
       accolades,
       ripeness: ripeness(window.from, window.to, year),
+      // In the second half of its window or later: older bottles like simpler food.
+      mature:
+        window.from != null &&
+        window.to != null &&
+        year >= window.from + (window.to - window.from) / 2,
       cellars,
       total: {
         bottles: cellars.reduce((n, c) => n + c.bottles, 0),
@@ -424,7 +430,7 @@ export default function WinePage() {
         </Section>
 
         <Section title="Food matches">
-          <Placeholder text="Dishes that suit this wine will appear here." />
+          <FoodMatches wineId={wine.wine_id} mature={view.mature} />
         </Section>
 
         {view.others.length > 0 && (
