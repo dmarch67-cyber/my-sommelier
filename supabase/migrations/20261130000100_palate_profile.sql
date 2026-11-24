@@ -1,7 +1,7 @@
 -- My Sommelier: the palate profile.
 --
 -- The app works out the owner's taste from what is already there (what they
--- buy, what they drink fastest, their own scores and notes, including old
+-- have bought, newer vintages counting most, their own scores and notes, including old
 -- ones from CellarTracker) plus a short taste quiz, and uses it to rank
 -- Tonight's suggestions.
 --
