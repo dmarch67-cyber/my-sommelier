@@ -47,7 +47,8 @@ For each vintage you get the notes of an earlier review, which summarised recent
 - Say what the wine is like (fruit, structure, style) and how it is drinking now, and say who said so: "CellarTracker drinkers", "Jeb Dunnuck", "Vinous", "a 2025 note" and so on.
 - Use only what the review says. Never add a flavour, score, critic or opinion it does not give.
 - When the review found no recent tasting notes, begin with "No recent tasting notes." and then give what critics scored it or what the review expects of it, briefly.
-- Never use the word "window" and do not mention the review itself, "the digest", confidence, what the review had to rely on, or Vivino. Say "ready to drink", "needs time" or "drink soon" instead.
+- Do not give years or say how long it will keep (the page already shows its drinking dates); just say how it is drinking now, for example "ready to drink", "still needs time" or "drink soon".
+- Never use the word "window" and do not mention the review itself, "the digest", confidence, what the review had to rely on, or Vivino.
 - Name who said it when the review does (for example "CellarTracker drinkers" or "Jeb Dunnuck"); otherwise "a 2025 note" is fine.
 - Plain, warm English. No em dashes, no lists, no headings.
 
@@ -88,7 +89,8 @@ export function cleanAnswer(raw: unknown, w: WineIn): { vintage_id: string; text
       .replace(/\s*—\s*/g, ', ')
       .replace(/\s+/g, ' ')
       .trim();
-    if (!text || /vivino/i.test(text) || /\bwindow\b/i.test(text)) continue;
+    // Drinking dates belong to the window above it, so a summary naming one is redone.
+    if (!text || /vivino|\bwindow\b|\b20[3-9]\d/i.test(text)) continue;
     out.set(r.vintage_id, text.slice(0, 600));
   }
   return [...out.entries()].map(([vintage_id, text]) => ({ vintage_id, text }));
