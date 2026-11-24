@@ -6,8 +6,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LabelArt } from '../../components/LabelArt';
 import { RipenessBar } from '../../components/RipenessBar';
 import { SearchBar } from '../../components/SearchBar';
+import { useToast } from '../../components/Toast';
 import { Button, Chip, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
+import { downloadExport } from '../../data/exportFile';
 import { useLastCellar } from '../../data/lastCellar';
 import { useAuth } from '../../lib/auth';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
@@ -38,6 +40,28 @@ export default function CellarScreen() {
   const [sort, setSort] = useState<SortKey>('ready');
   const year = new Date().getFullYear();
   const showAll = filter === ALL_CELLARS;
+  const toast = useToast();
+
+  const exportToExcel = () => {
+    if (!filter) return;
+    try {
+      const { bottles } = downloadExport({
+        cellars: data.cellars,
+        inventory: data.inventory,
+        scores: data.scores,
+        notes: data.notes,
+        maturity: data.maturity,
+        bestScores: data.bestScores,
+        filter,
+      });
+      const which = showAll
+        ? 'all cellars'
+        : (data.cellars.find((c) => c.id === filter)?.name ?? 'this cellar');
+      toast(`Excel file downloaded: ${which}, ${bottles.toLocaleString('en-US')} bottles.`);
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Could not make the Excel file.');
+    }
+  };
 
   const inCellar = useMemo(
     () => (filter ? groupInventory(data.inventory, filter, data.bestScores) : []),
@@ -77,9 +101,24 @@ export default function CellarScreen() {
     <View style={styles.header}>
       <View style={styles.titleRow}>
         <T variant="title">Cellar</T>
-        <Pressable onPress={signOut} hitSlop={10} accessibilityRole="button">
-          <T variant="caption">Sign out</T>
-        </Pressable>
+        <View style={styles.titleActions}>
+          <Pressable
+            onPress={exportToExcel}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={
+              showAll ? 'Export all cellars to Excel' : 'Export this cellar to Excel'
+            }
+            style={styles.exportButton}
+          >
+            <T variant="caption" style={styles.exportText}>
+              Export to Excel
+            </T>
+          </Pressable>
+          <Pressable onPress={signOut} hitSlop={10} accessibilityRole="button">
+            <T variant="caption">Sign out</T>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -241,6 +280,15 @@ const styles = StyleSheet.create({
   },
   header: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: space.lg },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  titleActions: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  exportButton: {
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  exportText: { fontFamily: fonts.medium, color: colors.text },
   chips: { gap: space.sm },
   stats: { flexDirection: 'row', gap: space.sm },
   stat: {
