@@ -9,6 +9,7 @@ import {
   nameFit,
   parseCsv,
   parseScore,
+  ctPlace,
   rowFacts,
   words,
 } from '../../../supabase/functions/sync-cellartracker/ct.ts';
@@ -90,6 +91,22 @@ test('row facts: window, scores (owner score left out), grapes', () => {
   );
   assert.deepEqual(rowFacts(parseCsv(CSV)[1]).drink_from, null);
   assert.deepEqual(rowFacts(parseCsv(CSV)[4]).grapes, [], 'a "Red Bordeaux Blend" is not a grape');
+});
+
+test('place parts come through, "Unknown" left out', () => {
+  assert.deepEqual(
+    ctPlace({
+      Country: 'USA',
+      Region: 'California',
+      SubRegion: 'Napa Valley',
+      Appellation: 'Oakville',
+    }),
+    { country: 'USA', region: 'California', sub_region: 'Napa Valley', appellation: 'Oakville' },
+  );
+  assert.deepEqual(
+    ctPlace({ Country: 'France', Region: 'Bordeaux', SubRegion: 'Unknown', Appellation: '' }),
+    { country: 'France', region: 'Bordeaux', sub_region: null, appellation: null },
+  );
 });
 
 test('matching: same year and best name; ties and strangers are left alone', () => {
