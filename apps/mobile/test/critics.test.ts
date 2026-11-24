@@ -99,3 +99,20 @@ test('falls back to a CellarTracker search', () => {
   assert.equal(notesUrl('Château Lascombes', 2011, []), searchUrl('Château Lascombes', 2011));
   assert.match(searchUrl('Krug Grande Cuvée', null), /szSearch=Krug%20Grande%20Cuv%C3%A9e$/);
 });
+
+test("the id from the owner's CellarTracker export wins over everything else", () => {
+  const sources = [
+    {
+      url: 'https://www.cellartracker.com/wine.asp?iWine=333',
+      title: '2010 Château Lascombes - CellarTracker',
+    },
+  ];
+  assert.equal(
+    notesUrl('Château Lascombes', 2010, sources, '5039528'),
+    'https://www.cellartracker.com/wine.asp?iWine=5039528',
+  );
+  assert.equal(
+    notesUrl('Château Lascombes', 2010, sources, 'not-a-number'),
+    'https://www.cellartracker.com/wine.asp?iWine=333',
+  );
+});

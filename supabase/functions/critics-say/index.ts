@@ -97,7 +97,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
     .from('wines')
     .select(
       'id,name,producer,country,region,appellation,' +
-        'vintages(id,year,scores(source,source_detail,raw_value),' +
+        'vintages(id,year,cellartracker_id,scores(source,source_detail,raw_value),' +
         'vintage_assessments(summary,maturity,recent_notes,latest_note_year,' +
         'wine_assessments(sources)))',
     )
@@ -108,6 +108,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
   const sources: Source[] = [];
   const vintages: VintageIn[] = [];
   const years = new Map<string, number | null>();
+  const ctIds = new Map<string, string | null>();
   // deno-lint-ignore no-explicit-any
   for (const v of (w.vintages ?? []) as any[]) {
     const va = Array.isArray(v.vintage_assessments)
@@ -119,6 +120,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
         sources.push({ url: s.url, title: String(s.title ?? '') });
     }
     years.set(v.id, v.year);
+    ctIds.set(v.id, v.cellartracker_id ?? null);
     vintages.push({
       vintage_id: v.id,
       year: v.year,
@@ -150,7 +152,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
   }
   const items = cleanAnswer(JSON.parse(block.text), wine).map((i) => ({
     ...i,
-    url: notesUrl(w.name, years.get(i.vintage_id) ?? null, sources),
+    url: notesUrl(w.name, years.get(i.vintage_id) ?? null, sources, ctIds.get(i.vintage_id)),
   }));
   const { data: saved, error: saveError } = await db.rpc('save_critics_say', { p_items: items });
   if (saveError) throw new Error(saveError.message);
