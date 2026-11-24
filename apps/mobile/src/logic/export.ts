@@ -114,7 +114,7 @@ export function buildExport(input: ExportInput): ExportResult {
     const cur = lastNote.get(n.vintage_id);
     if (
       !cur ||
-      n.tasted_on > cur.tasted_on ||
+      (n.tasted_on ?? '') > (cur.tasted_on ?? '') ||
       (n.tasted_on === cur.tasted_on && n.created_at > cur.created_at)
     )
       lastNote.set(n.vintage_id, n);
@@ -176,7 +176,7 @@ export function buildExport(input: ExportInput): ExportResult {
       ready.state === 'unknown' ? null : ready.label,
       maturity ? MATURITY[maturity] : null,
       note?.rating == null ? null : Math.round((note.rating / 20) * 10) / 10,
-      note ? note.tasted_on.slice(0, 10) : null,
+      note?.tasted_on ? note.tasted_on.slice(0, 10) : null,
     ];
   });
 

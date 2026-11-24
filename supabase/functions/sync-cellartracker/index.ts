@@ -5,6 +5,8 @@
 // app's wines by name and vintage, and saves windows, scores (including
 // Vinous, when the owner has linked Vinous in CellarTracker), colour and
 // grapes through apply_cellartracker(). Bottle counts are never used.
+// Also brings in the owner's own tasting notes and scores (never anyone
+// else's) as tasting notes, for the palate profile.
 //
 // Runs at most once a day per account unless called with {"force": true}.
 // Secrets (set in the Supabase dashboard, never in code or chat):
@@ -21,6 +23,7 @@ import {
   exportUrl,
   looksLikeExport,
   matchRows,
+  ownNotes,
   parseCsv,
   rowFacts,
   type AppVintage,
@@ -36,7 +39,7 @@ const CORS = {
 const DEFAULT_OWNER_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
 // Bump when the matching changes, so the next app start re-runs the sync
 // instead of waiting a day.
-const MATCHER_VERSION = 4;
+const MATCHER_VERSION = 5; // 5: also brings in the owner's own notes and scores
 const DAY_MS = 20 * 60 * 60 * 1000; // "once a day", with some slack
 
 function reply(status: number, body: unknown): Response {
@@ -233,6 +236,33 @@ Deno.serve(async (req) => {
       claudeNote = String(e).slice(0, 200);
     }
   }
+  // 5. The owner's own notes and scores (their Notes export and the List's MY
+  // column), for the palate profile. Only ever their own; a failure here
+  // keeps everything above.
+  let own: unknown = null;
+  try {
+    let noteRows: Record<string, string>[] = [];
+    const res = await fetch(exportUrl(ctUser, ctPassword, 'Notes'), {
+      headers: { 'User-Agent': 'MySommelier/1.0 (personal cellar app)' },
+    });
+    if (res.ok) {
+      const text = new TextDecoder('windows-1252').decode(new Uint8Array(await res.arrayBuffer()));
+      const parsed = parseCsv(text);
+      if (parsed.length > 0 && 'iWine' in parsed[0]) noteRows = parsed;
+    }
+    const notes = ownNotes(rows, noteRows, matches);
+    const { data, error } = await db.rpc('apply_ct_own_notes', { p_notes: notes });
+    own = error
+      ? `save failed: ${error.message}`
+      : {
+          note_rows: noteRows.length,
+          note_columns: noteRows[0] ? Object.keys(noteRows[0]) : [],
+          found: notes.length,
+          saved: data,
+        };
+  } catch (e) {
+    own = String(e).slice(0, 200);
+  }
   const matchedIds = new Set(matches.map((m) => m.vintage_id));
   const usedCt = new Set(matches.map((m) => m.ct_id));
   const unmatchedApp = vintages.length - matchedIds.size;
@@ -256,6 +286,7 @@ Deno.serve(async (req) => {
     ct_sample: rows.slice(0, 25).map((r) => `${r.Wine} ${r.Vintage}`),
     applied,
     places: placesApplied,
+    own_notes: own,
   };
   await log(true, summary);
   return reply(200, summary);

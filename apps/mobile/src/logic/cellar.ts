@@ -81,8 +81,13 @@ export type TastingNote = {
   account_id: string;
   vintage_id: string;
   inventory_event_id: string | null;
-  tasted_on: string;
+  /** Empty for an old CellarTracker score with no date. */
+  tasted_on: string | null;
   rating: number | null;
+  /** Thumbs up (true) or down (false); added later, so may be missing. */
+  liked?: boolean | null;
+  /** 'app' or 'cellartracker' (the owner's own old notes); may be missing. */
+  source?: string;
   maturity: Maturity | null;
   notes: string | null;
   food_pairing: string | null;

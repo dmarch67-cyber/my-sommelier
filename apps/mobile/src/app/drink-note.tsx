@@ -44,6 +44,7 @@ export default function DrinkNoteScreen() {
     food_pairing: '',
     occasion: '',
     would_buy_again: null,
+    liked: null,
   });
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState<'save' | 'undo' | null>(null);
@@ -56,6 +57,7 @@ export default function DrinkNoteScreen() {
   };
 
   const hasNote =
+    note.liked != null ||
     note.stars != null ||
     note.notes.trim() ||
     note.maturity ||
@@ -130,6 +132,39 @@ export default function DrinkNoteScreen() {
               {busy === 'undo' ? 'Putting it back…' : 'Undo, put it back'}
             </T>
           </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <T variant="heading">Did you enjoy it?</T>
+          <View style={styles.thumbs}>
+            {[
+              { v: true, label: '👍  Yes', a11y: 'Thumbs up' },
+              { v: false, label: '👎  Not really', a11y: 'Thumbs down' },
+            ].map((o) => {
+              const selected = note.liked === o.v;
+              return (
+                <Pressable
+                  key={String(o.v)}
+                  onPress={() => set({ liked: selected ? null : o.v })}
+                  accessibilityRole="button"
+                  accessibilityLabel={o.a11y}
+                  accessibilityState={{ selected }}
+                  style={({ pressed }) => [
+                    styles.thumb,
+                    selected && styles.thumbSelected,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <T variant="bodyStrong" style={selected ? { color: colors.onAccent } : undefined}>
+                    {o.label}
+                  </T>
+                </Pressable>
+              );
+            })}
+          </View>
+          <T variant="caption">
+            One tap keeps your palate up to date. Stars and a note are optional.
+          </T>
         </View>
 
         <View style={styles.section}>
@@ -231,5 +266,15 @@ const styles = StyleSheet.create({
   undo: { alignSelf: 'flex-start', paddingVertical: space.sm },
   section: { gap: space.md, marginTop: space.xl },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  thumbs: { flexDirection: 'row', gap: space.sm },
+  thumb: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: space.md,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  thumbSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
   buttons: { marginTop: space.xl },
 });

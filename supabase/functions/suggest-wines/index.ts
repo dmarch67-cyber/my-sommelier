@@ -9,6 +9,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
 
 import {
   cleanCandidate,
+  cleanPalate,
   cleanSuggestion,
   MAX_CANDIDATES,
   MODEL,
@@ -48,7 +49,7 @@ Deno.serve(async (req) => {
   }).auth.getUser(token);
   if (authError || !who?.user) return reply(401, { error: 'Sign in first.' });
 
-  let body: { ask?: unknown; candidates?: unknown };
+  let body: { ask?: unknown; candidates?: unknown; palate?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -59,6 +60,7 @@ Deno.serve(async (req) => {
     .map(cleanCandidate)
     .filter((c): c is Candidate => c !== null)
     .slice(0, MAX_CANDIDATES);
+  const palate = cleanPalate(body.palate);
   if (!ask) return reply(400, { error: 'Say what you’re eating or in the mood for.' });
   if (candidates.length === 0) return reply(200, { picks: [], note: null });
 
@@ -74,7 +76,7 @@ Deno.serve(async (req) => {
         format: { type: 'json_schema', schema: SUGGESTION_SCHEMA },
       },
       system: SYSTEM,
-      messages: [{ role: 'user', content: userText(ask, candidates) }],
+      messages: [{ role: 'user', content: userText(ask, candidates, palate) }],
     });
 
     if (response.stop_reason === 'refusal') {

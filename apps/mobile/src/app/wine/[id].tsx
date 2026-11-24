@@ -411,7 +411,15 @@ export default function WinePage() {
                   }}
                 >
                   <Stars value={n.rating ? Math.round(n.rating / 20) : null} size={18} />
-                  <T variant="caption">{formatDay(n.tasted_on)}</T>
+                  <T variant="caption">
+                    {[
+                      n.liked === true ? '👍' : n.liked === false ? '👎' : null,
+                      n.tasted_on ? formatDay(n.tasted_on) : null,
+                      n.source === 'cellartracker' ? 'From CellarTracker' : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </T>
                 </View>
                 {n.notes ? <T variant="body">{n.notes}</T> : null}
                 {[n.food_pairing && `With ${n.food_pairing}`, n.occasion].filter(Boolean).length >

@@ -10,9 +10,12 @@
  *  2. Food: what the ask mentions ("lamb", "oysters") favours the right
  *     colour, body, grapes and regions.
  *  3. Quality: the best score.
- *  4. Preference: wines the owner rated well before.
+ *  4. Preference: wines the owner rated well before, and how well the bottle
+ *     fits their palate profile (logic/palate.ts). "Surprise me" turns that
+ *     around. A wine they gave a thumbs down drops down the list.
  */
 
+import { ageNudge, palateFit, palateWeight, type PalateProfile } from './palate.ts';
 import {
   fold,
   placeLine,
@@ -234,6 +237,8 @@ export type Ask = {
   foods: Pairing[];
   /** Words left over, used to look for a wine, region or year by name. */
   words: string[];
+  /** "Surprise me": step outside the owner's usual palate. */
+  surprise?: boolean;
 };
 
 const COLOUR_WORDS: Record<string, StyleColour> = {
@@ -319,7 +324,12 @@ export function parseAsk(text: string): Ask {
   let colour: StyleColour | null = null;
   let body: StyleBody | null = null;
   const words: string[] = [];
+  let surprise = false;
   for (const w of tokens(text)) {
+    if (/^surpris/.test(w)) {
+      surprise = true;
+      continue;
+    }
     if (used.has(w) || used.has(w.replace(/s$/, ''))) continue;
     if (COLOUR_WORDS[w]) {
       colour = colour ?? COLOUR_WORDS[w];
@@ -332,7 +342,7 @@ export function parseAsk(text: string): Ask {
     if (STOP.has(w) || w.length < 2) continue;
     words.push(PLACE_WORDS[w] ?? w);
   }
-  return { colour, body, foods, words };
+  return { colour, body, foods, words, surprise };
 }
 
 // Ranking ---------------------------------------------------------------------
@@ -411,6 +421,8 @@ export type TonightOptions = {
   maturity?: Map<string, Maturity>;
   /** The owner's own notes, for "you liked this before". */
   notes?: TastingNote[];
+  /** The owner's palate profile: bottles that fit it move up. */
+  palate?: PalateProfile | null;
 };
 
 export type Pick = {
@@ -602,8 +614,13 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
     const rating = ratings.get(item.wineId) ?? null;
     const pref = rating == null ? 0 : Math.min(Math.max((rating - 60) / 40, 0), 1);
 
+    const taste = o.palate ? palateFit(item, o.palate) : null;
+    const weight = o.palate ? palateWeight(o.palate, !!o.ask.surprise) : 0;
+
     const rank =
       (ready.excluded ? -10 : 0) +
+      (taste ? weight * taste.fit + ageNudge(o.palate!, ready.state) : 0) +
+      (taste?.notForMe && !named ? -0.25 : 0) +
       0.6 * ready.fit +
       0.2 * scoreFit(item.score) +
       (food ? 0.45 * food.fit : 0) +
@@ -614,6 +631,8 @@ export function recommend(items: CellarItem[], o: TonightOptions): TonightResult
     if (food?.why && food.fit >= 0.5) reasons.push(food.why);
     if (rating != null && rating >= 80) {
       reasons.push(`You gave it ${Math.round(rating / 20)} stars`);
+    } else if (taste?.why && !o.ask.surprise) {
+      reasons.push(taste.why);
     }
     picks.push({ item, rank, ready, reasons, dish: food?.dish ?? null });
   }

@@ -16,9 +16,14 @@ export class SuggestError extends Error {
 }
 
 /** Asks the sommelier (a Supabase Edge Function that asks Claude) to choose from these bottles. */
-export async function askSommelier(ask: string, candidates: Candidate[]): Promise<Suggestion> {
+export async function askSommelier(
+  ask: string,
+  candidates: Candidate[],
+  /** The owner's palate in a few sentences (logic/palate.ts palateText). */
+  palate?: string,
+): Promise<Suggestion> {
   const { data, error } = await supabase.functions.invoke<Suggestion>('suggest-wines', {
-    body: { ask, candidates },
+    body: { ask, candidates, ...(palate ? { palate } : {}) },
   });
   if (error) {
     if (error instanceof FunctionsHttpError) {
