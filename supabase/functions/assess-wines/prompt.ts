@@ -205,7 +205,7 @@ export const NOTES_TOOL = {
 } as const;
 
 export function readerSystem(year: number): string {
-  return `You gather recent tasting notes on wines for a cellar master. It is ${year}. Search the web for notes on the vintages listed, from the last two to three years: CellarTracker community notes, WineBerserkers threads, Reddit, merchants and critics. A few targeted searches are plenty; one search can cover several vintages. Do not search vintages that are not listed.
+  return `You gather recent tasting notes on wines for a cellar master. It is ${year}. Search the web for notes on the vintages listed, from the last two to three years. Start with CellarTracker, whose wine pages hold the most community notes: search for the producer, wine and vintage with the word cellartracker. Then try WineBerserkers, Reddit, merchants and critics. One search can cover several vintages. Do not search vintages that are not listed.
 
 For each vintage, record up to six of the most recent notes you actually found, each with its date, source, a maturity signal (too_young, approaching, ready, peak, declining, past_it, or unclear) and a gist of at most 25 words in your own words. Never invent a note; an empty list is fine. Then call record_notes once.`;
 }

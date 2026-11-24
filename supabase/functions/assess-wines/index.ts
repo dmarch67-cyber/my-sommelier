@@ -234,7 +234,7 @@ async function readNotes(
         output_config: { effort: 'low' },
         system: readerSystem(year),
         tools: [
-          { type: 'web_search_20250305', name: 'web_search', max_uses: 4 },
+          { type: 'web_search_20250305', name: 'web_search', max_uses: 6 },
           NOTES_TOOL as unknown as Anthropic.Beta.BetaTool,
         ],
         tool_choice: { type: 'auto' },
