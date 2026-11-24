@@ -8,6 +8,7 @@ import {
   type Accolade,
   type Cellar,
   type InventoryRow,
+  type Maturity,
   type Score,
   type TastingNote,
 } from '../logic/cellar';
@@ -29,6 +30,8 @@ type CellarData = {
   scores: Score[];
   accolades: Accolade[];
   notes: TastingNote[];
+  /** How mature recent notes say each vintage is (from the blended reviews), by vintage id. */
+  maturity: Map<string, Maturity>;
   bestScores: Map<string, Score>;
   /** Fetches everything again. Screens keep showing the old data meanwhile. */
   reload: () => Promise<void>;
@@ -88,15 +91,32 @@ const NOTE_COLUMNS =
 
 type Loaded = Omit<CellarData, 'bestScores' | 'reload'>;
 
+/** Optional extra: an older database without the reviews table just gives an empty map. */
+async function loadMaturity(): Promise<Map<string, Maturity>> {
+  try {
+    const rows = await fetchAll<{ vintage_id: string; maturity: Maturity | null }>(
+      'vintage_assessments',
+      'vintage_id,maturity',
+      'vintage_id',
+    );
+    return new Map(
+      rows.filter((r) => r.maturity).map((r) => [r.vintage_id, r.maturity as Maturity]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 async function loadAll(): Promise<Loaded> {
-  const [cellars, inventory, scores, accolades, notes] = await Promise.all([
+  const [cellars, inventory, scores, accolades, notes, maturity] = await Promise.all([
     fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
     fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
     fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
     fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
     fetchAll<TastingNote>('tasting_notes', NOTE_COLUMNS, 'id'),
+    loadMaturity(),
   ]);
-  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes };
+  return { status: 'ready', error: null, cellars, inventory, scores, accolades, notes, maturity };
 }
 
 export function CellarDataProvider({ children }: { children: ReactNode }) {
@@ -108,6 +128,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     scores: [],
     accolades: [],
     notes: [],
+    maturity: new Map(),
   });
 
   const reload = useCallback(async () => {

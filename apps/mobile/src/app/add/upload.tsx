@@ -193,7 +193,7 @@ export default function UploadScreen() {
           </View>
           <Button
             label="Done"
-            onPress={() => router.replace('/')}
+            onPress={() => router.replace('/cellar')}
             style={{ marginTop: space.xl }}
           />
         </View>

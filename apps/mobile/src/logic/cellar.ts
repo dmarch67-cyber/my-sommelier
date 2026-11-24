@@ -105,6 +105,10 @@ export type CellarItem = {
   region: string | null;
   appellation: string | null;
   colour: string | null;
+  /** light / medium / full, when known. */
+  body: string | null;
+  grapes: string[];
+  producer: string | null;
   bottles: number;
   magnums: number;
   otherSizes: number;
@@ -143,6 +147,9 @@ export function groupInventory(
         region: r.region,
         appellation: r.appellation,
         colour: r.colour,
+        body: r.body ?? null,
+        grapes: r.grapes ?? [],
+        producer: r.producer,
         bottles: 0,
         magnums: 0,
         otherSizes: 0,
