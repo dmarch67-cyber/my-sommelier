@@ -180,3 +180,29 @@ test('the digest keeps only searched vintages and real notes', () => {
   assert.match(text, /N https:\/\/example.test\/n/);
   assert.match(digestText(wine, near, null), /2005 \(vintage_id v05\): no recent notes found/);
 });
+
+test("the review never sees Claude's own earlier windows", () => {
+  const again: WineIn = {
+    ...wine,
+    vintages: [
+      {
+        ...wine.vintages[0],
+        drink_from: 2029,
+        drink_to: 2052,
+        drink_window_source: 'blended',
+        ct_drink_from: 2030,
+        ct_drink_to: 2060,
+      },
+      { ...wine.vintages[1], drink_from: 2010, drink_to: 2030, drink_window_source: 'owner' },
+    ],
+  };
+  const text = userText(again);
+  assert.match(text, /CellarTracker window: 2030-2060/);
+  assert.doesNotMatch(text, /2029-2052/);
+  assert.match(text, /owner's window: 2010-2030/);
+  assert.deepEqual(
+    nearReady(again, 2026).map((v) => v.id),
+    ['v05'],
+    'uses the CellarTracker window to decide',
+  );
+});

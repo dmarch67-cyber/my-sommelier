@@ -34,6 +34,9 @@ export type VintageIn = {
   drink_from: number | null;
   drink_to: number | null;
   drink_window_source: string | null;
+  /** CellarTracker's own window, kept even after a blended window replaces it. */
+  ct_drink_from?: number | null;
+  ct_drink_to?: number | null;
   scores: ScoreIn[];
   own_notes: OwnNoteIn[];
 };
@@ -143,7 +146,10 @@ export const READER_MODEL = 'claude-haiku-5-5';
 
 /** Vintages worth searching: no window yet, or one that opens within two years. */
 export function nearReady(w: WineIn, year: number): VintageIn[] {
-  return w.vintages.filter((v) => v.drink_from == null || v.drink_from <= year + 2);
+  return w.vintages.filter((v) => {
+    const from = v.ct_drink_from ?? v.drink_from;
+    return from == null || from <= year + 2;
+  });
 }
 
 export const SIGNALS = [...MATURITIES, 'unclear'] as const;
@@ -300,9 +306,15 @@ export function userText(w: WineIn): string {
   ].filter((l): l is string => l !== null);
   for (const v of w.vintages) {
     lines.push(`- vintage_id ${v.id}: ${v.year ?? 'NV'} (${v.bottles} bottles)`);
-    if (v.drink_from && v.drink_to) {
-      const from = v.drink_window_source === 'cellartracker' ? 'CellarTracker' : 'current';
-      lines.push(`  ${from} window: ${v.drink_from}-${v.drink_to}`);
+    // CellarTracker's window, and the owner's own if they set one. Earlier
+    // guesses by Claude (estimate, blended) are left out so a review is not
+    // anchored on itself.
+    const ctFrom =
+      v.ct_drink_from ?? (v.drink_window_source === 'cellartracker' ? v.drink_from : null);
+    const ctTo = v.ct_drink_to ?? (v.drink_window_source === 'cellartracker' ? v.drink_to : null);
+    if (ctFrom && ctTo) lines.push(`  CellarTracker window: ${ctFrom}-${ctTo}`);
+    if (v.drink_window_source === 'owner' && v.drink_from && v.drink_to) {
+      lines.push(`  owner's window: ${v.drink_from}-${v.drink_to}`);
     }
     for (const s of v.scores) lines.push(`  score: ${scoreLine(s)}`);
     for (const n of v.own_notes) {

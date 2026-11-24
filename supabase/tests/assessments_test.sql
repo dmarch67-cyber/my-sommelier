@@ -108,8 +108,9 @@ select pg_temp.check(
 select public.apply_cellartracker(jsonb_build_array(jsonb_build_object(
   'vintage_id', (select r19 from ids), 'drink_from', 2031, 'drink_to', 2070)));
 select pg_temp.check(
-  (select drink_to = 2052 and drink_window_source = 'blended' from public.vintages where id = (select r19 from ids)),
-  'a CellarTracker sync keeps the blended window');
+  (select drink_to = 2052 and drink_window_source = 'blended' and ct_drink_to = 2070
+   from public.vintages where id = (select r19 from ids)),
+  'a CellarTracker sync keeps the blended window but records its own');
 
 -- A failure frees the wine to be tried again; a done wine is not re-claimed.
 select public.fail_assessment((select a from claim2), 'boom', null);
