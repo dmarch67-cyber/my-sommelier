@@ -57,6 +57,20 @@ test('answers keep only asked vintages, drop Vivino and em dashes', () => {
     cleanAnswer({ vintages: [{ vintage_id: 'v10', text: 'Keeps into the 2030s.' }] }, wine),
     [],
   );
+  assert.deepEqual(
+    cleanAnswer(
+      {
+        vintages: [
+          {
+            vintage_id: 'v10',
+            text: 'The latest notes we could find are from 2024; CellarTracker may have newer ones.',
+          },
+        ],
+      },
+      wine,
+    ),
+    [],
+  );
   assert.deepEqual(cleanAnswer(null, wine), []);
 });
 

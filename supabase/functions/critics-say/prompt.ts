@@ -46,7 +46,7 @@ For each vintage you get the notes of an earlier review, which summarised recent
 - Two or three short sentences, at most 60 words.
 - Say what the wine is like (fruit, structure, style) and how it is drinking now, and say who said so: "CellarTracker drinkers", "Jeb Dunnuck", "Vinous", "a 2025 note" and so on.
 - Use only what the review says. Never add a flavour, score, critic or opinion it does not give.
-- The search behind the review cannot see every new note, so never claim a wine has no recent notes. When the review found no notes from the last two years, begin with "The latest notes we could find are from <when>; CellarTracker may have newer ones." using the latest note year given (or "We could not find recent notes online; CellarTracker may have some." when there is none), then give what those notes or critics said, briefly.
+- Never comment on how old or how many the notes are, and never say there are no recent notes or that newer notes may exist elsewhere (the page shows the date of the latest note). Just say what the notes and critics said.
 - Do not give drinking dates or say how long it will keep (the page already shows them); just say how it is drinking now, for example "ready to drink", "still needs time" or "drink soon".
 - Never use the word "window" and do not mention the review itself, "the digest", confidence, what the review had to rely on, or Vivino.
 - Name who said it when the review does (for example "CellarTracker drinkers" or "Jeb Dunnuck"); otherwise "a 2025 note" is fine.
@@ -90,7 +90,13 @@ export function cleanAnswer(raw: unknown, w: WineIn): { vintage_id: string; text
       .replace(/\s+/g, ' ')
       .trim();
     // Drinking dates belong to the window above it, so a summary naming one is redone.
-    if (!text || /vivino|\bwindow\b|\b20[3-9]\d|no recent (tasting )?notes/i.test(text)) continue;
+    if (
+      !text ||
+      /vivino|\bwindow\b|\b20[3-9]\d|no recent (tasting )?notes|notes we could find|may have (newer|some)|recent notes online/i.test(
+        text,
+      )
+    )
+      continue;
     out.set(r.vintage_id, text.slice(0, 600));
   }
   return [...out.entries()].map(([vintage_id, text]) => ({ vintage_id, text }));
