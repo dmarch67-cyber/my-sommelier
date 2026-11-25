@@ -267,3 +267,36 @@ test('the same note quoted by two shops is kept once, the dated and fuller one',
     ['b'],
   );
 });
+
+test('a note credited to the wrong page is moved to the page it is on; shops quoting Vinous are fine', () => {
+  const pages = [
+    {
+      url: 'https://a.example.com/x',
+      site: 'a.example.com',
+      text: 'Nothing about tasting here at all. '.repeat(10),
+      pdf: false,
+    },
+    { url: 'https://b.example.com/y', site: 'b.example.com', text: pageText(html), pdf: false },
+  ];
+  const { notes } = cleanNotes(
+    {
+      notes: [
+        {
+          vintage_id: V1,
+          author: 'Neal Martin, vinous.com',
+          kind: 'critic',
+          score: '95',
+          noted_on: null,
+          note: NOTE,
+          page: 1,
+        },
+      ],
+    },
+    wine,
+    pages,
+    2026,
+  );
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].source_site, 'b.example.com');
+  assert.equal(notes[0].author, 'Neal Martin, Vinous');
+});

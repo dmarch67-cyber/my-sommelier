@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
         .in('vintage_id', touched);
     }
     usage.notes = added;
-    await finish(notes.length ? 'found' : 'none', {
+    await finish(notes.length || saved.size ? 'found' : 'none', {
       pages: read.map((p) => p.url),
     });
     return reply(200, {
@@ -370,13 +370,25 @@ async function takeNotes(
   }
   const answers = await Promise.all(
     groups.map((g) =>
-      readGroup(client, wine, pages, g, usage).catch((e) => {
+      readGroup(client, wine, pages, g, usage).catch(async (e) => {
+        // Too many notes for one answer: read those pages one at a time.
+        if (g.length > 1 && /max_tokens/.test(String(e))) {
+          const each = await Promise.all(
+            g.map((i) =>
+              readGroup(client, wine, pages, [i], usage).catch((e2) => {
+                usage.read_errors.push(String(e2).slice(0, 120));
+                return [] as unknown[];
+              }),
+            ),
+          );
+          return each.flat();
+        }
         usage.read_errors.push(String(e).slice(0, 120));
         return [] as unknown[];
       }),
     ),
   );
-  if (answers.every((a) => a.length === 0) && usage.read_errors.length === groups.length) {
+  if (answers.every((a) => a.length === 0) && usage.read_errors.length >= groups.length) {
     throw new Error(`reader failed: ${usage.read_errors[0]}`);
   }
   return { notes: answers.flat() };

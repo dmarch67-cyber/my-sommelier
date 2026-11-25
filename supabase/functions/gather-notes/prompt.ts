@@ -325,9 +325,15 @@ export function cleanNotes(
   const seen = new Set<string>();
   for (const n of Array.isArray(list) ? list : []) {
     const r = n as Record<string, unknown>;
-    const page = Number.isInteger(r?.page) ? pages[(r.page as number) - 1] : undefined;
+    let page = Number.isInteger(r?.page) ? pages[(r.page as number) - 1] : undefined;
     const note = typeof r?.note === 'string' ? r.note.replace(/\s+/g, ' ').trim() : '';
-    const author = typeof r?.author === 'string' ? r.author.replace(/\s+/g, ' ').trim() : '';
+    const author =
+      typeof r?.author === 'string'
+        ? r.author
+            .replace(/\s+/g, ' ')
+            .replace(/\bvinous\.com\b/gi, 'Vinous')
+            .trim()
+        : '';
     if (
       !page ||
       typeof r.vintage_id !== 'string' ||
@@ -335,12 +341,17 @@ export function cleanNotes(
       !KINDS.includes(r.kind as Kind) ||
       note.length < 20 ||
       !author ||
-      /vivino|cellartracker|vinous\.com|wineberserkers/i.test(author)
+      /vivino/i.test(author)
     ) {
       rejected++;
       if (samples.length < 4)
         samples.push(`bad: ${author} p${String(r?.page)} ${note.slice(0, 60)}`);
       continue;
+    }
+    // Claude sometimes names the wrong page of a group; credit the page the
+    // note is really on.
+    if (!page.pdf && !(page.text && onPage(note, page.text))) {
+      page = pages.find((p) => !p.pdf && p.text && onPage(note, p.text)) ?? page;
     }
     if (!page.pdf && !(page.text && onPage(note, page.text))) {
       rejected++;
