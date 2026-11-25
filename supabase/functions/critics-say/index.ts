@@ -98,6 +98,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
     .select(
       'id,name,producer,country,region,appellation,' +
         'vintages(id,year,cellartracker_id,scores(source,source_detail,raw_value),' +
+        'critic_notes(author,kind,score,noted_on,note),' +
         'vintage_assessments(summary,maturity,recent_notes,latest_note_year,' +
         'wine_assessments(sources)))',
     )
@@ -129,6 +130,7 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
       latest_note_year: va.latest_note_year,
       summary: va.summary,
       scores: (v.scores ?? []).filter((s: { source: string }) => !/vivino/i.test(s.source)),
+      notes: v.critic_notes ?? [],
     });
   }
   if (vintages.length === 0) return { wine_id: wineId, saved: 0 };
