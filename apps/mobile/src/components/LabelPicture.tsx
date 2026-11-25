@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { useCellarData } from '../data/CellarData';
-import { removeLabel, savePhotoLabel } from '../data/labels';
+import { labelFor, removeLabel, savePhotoLabel } from '../data/labels';
 import { shrink } from '../lib/photo';
 import { colors, radius, space } from '../lib/theme';
 import { LabelArt } from './LabelArt';
@@ -17,18 +17,20 @@ import { T } from './ui';
  */
 export function LabelPicture({
   wineId,
+  vintageId,
   name,
   vintage,
   colour,
 }: {
   wineId: string;
+  vintageId: string;
   name: string;
   vintage: number | null;
   colour: string | null;
 }) {
   const data = useCellarData();
   const toast = useToast();
-  const label = data.labels.get(wineId);
+  const label = labelFor(data.labels, wineId, vintageId);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export function LabelPicture({
       setBusy(true);
       const photo = await shrink(res.assets[0]);
       setPreview(photo.uri);
-      await savePhotoLabel(data.accountId, wineId, photo.base64, label?.path ?? null);
+      await savePhotoLabel(data.accountId, wineId, vintageId, photo.base64, data.labels);
       await data.reload();
       toast('Picture saved');
     } catch (e) {
@@ -68,7 +70,7 @@ export function LabelPicture({
     if (!label) return;
     setBusy(true);
     try {
-      await removeLabel(wineId, label.path);
+      await removeLabel(wineId, vintageId, data.labels);
       setPreview(null);
       await data.reload();
       toast('Picture removed');
@@ -88,6 +90,7 @@ export function LabelPicture({
       >
         <LabelArt
           wineId={wineId}
+          vintageId={vintageId}
           uri={preview}
           name={name}
           vintage={vintage}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { useCellarData } from '../data/CellarData';
+import { labelFor } from '../data/labels';
 import { colors, fonts, radius } from '../lib/theme';
 
 const TINTS: Record<string, { bg: string; fg: string }> = {
@@ -29,19 +30,21 @@ export function LabelArt({
   colour,
   size = 'small',
   wineId,
+  vintageId,
   uri: given,
 }: {
   name: string;
   vintage: number | null;
   colour: string | null;
   size?: 'small' | 'large';
-  /** The wine whose saved picture to show, if it has one. */
+  /** The wine and vintage whose saved picture to show (the vintage's own label first). */
   wineId?: string;
+  vintageId?: string;
   /** A picture to show instead (e.g. a photo just taken). */
   uri?: string | null;
 }) {
   const labels = useCellarData().labels;
-  const uri = given ?? (wineId ? labels.get(wineId)?.uri : null);
+  const uri = given ?? labelFor(labels, wineId, vintageId)?.uri ?? null;
   const tint = TINTS[colour ?? 'red'] ?? TINTS.red;
   const large = size === 'large';
   const [broken, setBroken] = useState(false);

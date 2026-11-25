@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  chosen,
+  assign,
   cleanPages,
   imageCandidates,
   isBlocked,
@@ -19,7 +19,7 @@ const wine = {
   region: 'Piedmont',
   appellation: null,
   colour: 'red',
-  years: [2016],
+  vintages: [{ id: 'v16', year: 2016 }],
 };
 
 test('never takes pages from blocked sites', () => {
@@ -31,12 +31,12 @@ test('never takes pages from blocked sites', () => {
     cleanPages({
       pages: [
         { url: 'https://www.vivino.com/x', kind: 'shop' },
-        { url: 'https://eliograsso.it/chiniera', kind: 'producer' },
-        { url: 'https://eliograsso.it/chiniera', kind: 'producer' },
+        { url: 'https://eliograsso.it/chiniera', kind: 'producer', year: null },
+        { url: 'https://eliograsso.it/chiniera', kind: 'producer', year: 2016 },
         { url: 'ftp://x', kind: 'other' },
       ],
     }),
-    [{ url: 'https://eliograsso.it/chiniera', kind: 'producer' }],
+    [{ url: 'https://eliograsso.it/chiniera', kind: 'producer', year: null }],
   );
 });
 
@@ -68,13 +68,36 @@ test('reads robots.txt for all robots', () => {
   );
 });
 
-test('keeps a picture only when the checker is sure it matches', () => {
-  const p = (matches: boolean) => [{ number: 1, shows: '', matches }];
-  assert.equal(chosen({ pictures: p(true), best: 1, confidence: 'high' }, 1), 1);
-  assert.equal(chosen({ pictures: p(true), best: 1, confidence: 'low' }, 1), null);
-  assert.equal(chosen({ pictures: p(false), best: 1, confidence: 'high' }, 1), null);
-  assert.equal(chosen({ pictures: p(true), best: 2, confidence: 'high' }, 1), null);
-  assert.equal(chosen(null, 1), null);
+test('gives each vintage the label showing its own year, close-ups first', () => {
+  const seen = (
+    number: number,
+    year: number | null,
+    view: 'label' | 'bottle' | 'other',
+    matches = true,
+    clear = true,
+  ) => ({ number, shows: '', matches, year, view, clear });
+  const vintages = [
+    { id: 'v18', year: 2018 },
+    { id: 'v19', year: 2019 },
+    { id: 'v20', year: 2020 },
+  ];
+  const look = {
+    pictures: [
+      seen(1, 2018, 'bottle'),
+      seen(2, 2018, 'label'),
+      seen(3, 2019, 'bottle'),
+      seen(4, 2020, 'label', false), // a different wine
+      seen(5, 2020, 'label', true, false), // too blurry
+      seen(6, 2021, 'label'),
+      seen(7, null, 'other'),
+    ],
+  };
+  const { byVintage, wine } = assign(look, 7, vintages);
+  assert.deepEqual(Object.fromEntries(byVintage), { v18: 2, v19: 3 });
+  assert.equal(wine, 6); // newest clear close-up stands in for 2020
+  assert.deepEqual(assign({ pictures: [seen(1, 2018, 'other')] }, 1, vintages).wine, null);
+  assert.equal(assign(null, 0, vintages).byVintage.size, 0);
+  assert.equal(assign({ pictures: [seen(9, 2018, 'label')] }, 2, vintages).wine, null);
 });
 
 test('recognises picture formats from their bytes', () => {

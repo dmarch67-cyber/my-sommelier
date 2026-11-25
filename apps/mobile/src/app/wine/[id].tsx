@@ -238,6 +238,7 @@ export default function WinePage() {
         <View style={styles.hero}>
           <LabelPicture
             wineId={wine.wine_id}
+            vintageId={wine.vintage_id}
             name={wine.wine_name}
             vintage={wine.vintage}
             colour={wine.colour}

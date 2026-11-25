@@ -21,8 +21,13 @@ export type WineIn = {
   region: string | null;
   appellation: string | null;
   colour: string | null;
-  years: number[];
+  /** The vintages still in the cellar (or on order), each wanting its own label. */
+  vintages: { id: string; year: number | null }[];
 };
+
+function years(w: WineIn): number[] {
+  return [...new Set(w.vintages.map((v) => v.year).filter((y): y is number => y != null))].sort();
+}
 
 export function describe(w: WineIn): string {
   const place = [w.appellation, w.region, w.country].filter(Boolean).join(', ');
@@ -31,36 +36,38 @@ export function describe(w: WineIn): string {
     w.producer ? `Producer: ${w.producer}` : null,
     place ? `From: ${place}` : null,
     w.colour ? `Colour: ${w.colour}` : null,
-    w.years.length ? `Vintages owned: ${w.years.join(', ')}` : null,
+    years(w).length ? `Vintages owned: ${years(w).join(', ')}` : null,
   ]
     .filter(Boolean)
     .join('\n');
 }
 
-export const SEARCH_SYSTEM = `You find web pages that show a picture of one specific wine's bottle or front label.
-Search the web, then call record_pages with up to 5 page addresses, best first.
-Best: the producer's (winery's) own page for this exact wine. Next: the importer's or distributor's page. Then a wine shop's product page for this wine (any vintage).
+export const SEARCH_SYSTEM = `You find web pages that show the front label of one specific wine, for each vintage the owner has.
+Labels often change from vintage to vintage, so look for a page for EACH vintage owned (wine shops usually have one product page per vintage), then a page for the wine in general (the producer's own page).
+Prefer pages likely to show a clear front-label close-up or a single bottle.
+Search the web, then call record_pages with up to 8 page addresses, best first, each with the vintage the page is about (null if it covers the wine in general).
 Rules:
-- The page must be about this exact wine (same producer AND same cuvée/vineyard/bottling), not the producer's home page or another of their wines.
+- Every page must be about this exact wine (same producer AND same cuvée/vineyard/bottling), not the producer's home page or another of their wines.
 - Never give pages from ${BLOCKED_DOMAINS.join(', ')}.
-- Use at most 3 searches. If you find nothing suitable, call record_pages with an empty list.`;
+- Use at most 4 searches. If you find nothing suitable, call record_pages with an empty list.`;
 
 export const PAGES_TOOL = {
   name: 'record_pages',
-  description: 'Record the pages most likely to show a picture of this wine, best first.',
+  description: "Record the pages most likely to show this wine's label, best first.",
   input_schema: {
     type: 'object',
     properties: {
       pages: {
         type: 'array',
-        maxItems: 5,
+        maxItems: 8,
         items: {
           type: 'object',
           properties: {
             url: { type: 'string' },
             kind: { type: 'string', enum: ['producer', 'importer', 'shop', 'other'] },
+            year: { type: ['integer', 'null'], description: 'The vintage the page is about.' },
           },
-          required: ['url', 'kind'],
+          required: ['url', 'kind', 'year'],
         },
       },
     },
@@ -68,7 +75,7 @@ export const PAGES_TOOL = {
   },
 } as const;
 
-export type Page = { url: string; kind: string };
+export type Page = { url: string; kind: string; year: number | null };
 
 export function cleanPages(raw: unknown): Page[] {
   const pages = (raw as { pages?: unknown })?.pages;
@@ -76,12 +83,16 @@ export function cleanPages(raw: unknown): Page[] {
   const out: Page[] = [];
   for (const p of pages) {
     const url = typeof p?.url === 'string' ? p.url.trim() : '';
-    if (!/^https:\/\//i.test(url) && !/^http:\/\//i.test(url)) continue;
+    if (!/^https?:\/\//i.test(url)) continue;
     if (isBlocked(url)) continue;
     if (out.some((o) => o.url === url)) continue;
-    out.push({ url, kind: typeof p?.kind === 'string' ? p.kind : 'other' });
+    out.push({
+      url,
+      kind: typeof p?.kind === 'string' ? p.kind : 'other',
+      year: Number.isInteger(p?.year) ? p.year : null,
+    });
   }
-  return out.slice(0, 5);
+  return out.slice(0, 8);
 }
 
 export function isBlocked(url: string): boolean {
@@ -124,7 +135,10 @@ const STOP = new Set([
 
 /** Distinctive lower-case words of a wine's name, for spotting its picture on a page. */
 export function nameWords(w: WineIn): string[] {
-  const text = `${w.producer ?? ''} ${w.name}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const text = `${w.producer ?? ''} ${w.name}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   const words = text.split(/[^a-z0-9]+/).filter((x) => x.length >= 3 && !STOP.has(x));
   return [...new Set(words)];
 }
@@ -212,7 +226,7 @@ export function imageCandidates(html: string, pageUrl: string, words: string[], 
       `${src} ${attr(tag, 'alt') ?? ''} ${attr(tag, 'title') ?? ''} ${attr(tag, 'class') ?? ''}`
         .toLowerCase()
         .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '');
+        .replace(/[\u0300-\u036f]/g, '');
     const hits = words.filter((w) => text.includes(w)).length;
     let score = hits * 2 + (GOOD_IMAGE.test(text) ? 2 : 0);
     const width = Number(attr(tag, 'width') ?? 0);
@@ -262,14 +276,12 @@ export function robotsAllows(robots: string, path: string): boolean {
 
 // ---------- looking at pictures ----------
 
-export const LOOK_SYSTEM = `You check candidate pictures for a wine-cellar app. The owner wants one picture of the bottle or front label of one specific wine.
-Each picture comes from a web page that a search found for this wine; you get the page's title too.
-A picture matches when it shows a bottle or front label of THIS wine:
-- What you can read on the label must agree with the wine: the producer and/or the specific wine (cuvée, vineyard or bottling) name. At least one of them must be readable on the label, and the page title must point to this exact wine.
-- Some labels show only the cuvée name (e.g. "Clio") or only the producer's art; that is fine when the page is clearly about this exact wine and nothing readable contradicts it.
-- A different vintage is fine. A different cuvée from the same producer (a different name readable on the label, or a page about a different wine) is NOT a match.
-Reject: logos alone, vineyard or people photos, cases or several different bottles, back labels, close crops of artwork with no words, and pictures too small or blurry to read.
-Pick the single best matching picture (prefer one whole bottle or a clear front label, upright, plain background), or none.`;
+export const LOOK_SYSTEM = `You check candidate pictures for a wine-cellar app. The owner wants a picture of the FRONT LABEL of one specific wine, ideally one for each vintage they own, because label art often changes from year to year.
+Each picture comes from a web page a search found for this wine; you get the page's title too. For every picture say:
+- matches: true when it shows a bottle or front label of THIS wine. What you can read on the label must agree with the wine (the producer and/or the specific cuvée, vineyard or bottling name; at least one must be readable) and the page title must point to this exact wine. A label that shows only the cuvée name or the producer's art is fine when the page is clearly about this wine and nothing readable contradicts it. A different cuvée from the same producer is NOT a match.
+- year: the vintage you can actually read on the label in the picture (not from the page title), or null if none is readable.
+- view: "label" when the front label fills most of the picture (a close-up), "bottle" when it is a whole single bottle with the front label visible, "other" for anything else (logos, vineyard or people photos, cases or several bottles, back labels, crops of artwork with no words).
+- clear: true when the label is sharp and big enough to read.`;
 
 export const LOOK_SCHEMA = {
   type: 'object',
@@ -282,33 +294,68 @@ export const LOOK_SCHEMA = {
           number: { type: 'integer' },
           shows: { type: 'string', description: 'What you can read and see, briefly.' },
           matches: { type: 'boolean' },
+          year: { type: ['integer', 'null'] },
+          view: { type: 'string', enum: ['label', 'bottle', 'other'] },
+          clear: { type: 'boolean' },
         },
-        required: ['number', 'shows', 'matches'],
+        required: ['number', 'shows', 'matches', 'year', 'view', 'clear'],
         additionalProperties: false,
       },
     },
-    best: {
-      type: ['integer', 'null'],
-      description: 'Number of the best matching picture, or null.',
-    },
-    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
   },
-  required: ['pictures', 'best', 'confidence'],
+  required: ['pictures'],
   additionalProperties: false,
 } as const;
 
-export type Look = {
-  pictures: { number: number; shows: string; matches: boolean }[];
-  best: number | null;
-  confidence: 'high' | 'medium' | 'low';
+export type Seen = {
+  number: number;
+  shows: string;
+  matches: boolean;
+  year: number | null;
+  view: 'label' | 'bottle' | 'other';
+  clear: boolean;
 };
+export type Look = { pictures: Seen[] };
 
-/** The chosen picture's number, only when the checker is confident it matches. */
-export function chosen(look: Look | null, count: number): number | null {
-  if (!look || look.best == null || look.confidence === 'low') return null;
-  if (!Number.isInteger(look.best) || look.best < 1 || look.best > count) return null;
-  const p = look.pictures.find((x) => x.number === look.best);
-  return p && p.matches ? look.best : null;
+/** Usable pictures, best first: label close-ups before whole bottles, then in page order. */
+function usable(look: Look | null, count: number): Seen[] {
+  return (look?.pictures ?? [])
+    .filter(
+      (p) =>
+        p.matches &&
+        p.clear &&
+        p.view !== 'other' &&
+        Number.isInteger(p.number) &&
+        p.number >= 1 &&
+        p.number <= count,
+    )
+    .sort((a, b) => (a.view === b.view ? a.number - b.number : a.view === 'label' ? -1 : 1));
+}
+
+/**
+ * Which picture (by number) goes on each vintage, and which one stands in for
+ * the wine as a whole. A vintage only gets a picture whose label shows its own
+ * year. The stand-in is the best picture of any year, newest year first among
+ * equally good ones.
+ */
+export function assign(
+  look: Look | null,
+  count: number,
+  vintages: { id: string; year: number | null }[],
+): { byVintage: Map<string, number>; wine: number | null } {
+  const good = usable(look, count);
+  const byVintage = new Map<string, number>();
+  for (const v of vintages) {
+    if (v.year == null) continue;
+    const p = good.find((g) => g.year === v.year);
+    if (p) byVintage.set(v.id, p.number);
+  }
+  const rank = (p: Seen) => (p.view === 'label' ? 0 : 1);
+  const wine =
+    [...good].sort(
+      (a, b) => rank(a) - rank(b) || (b.year ?? 0) - (a.year ?? 0) || a.number - b.number,
+    )[0]?.number ?? null;
+  return { byVintage, wine };
 }
 
 // ---------- picture bytes ----------

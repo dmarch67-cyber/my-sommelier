@@ -1,8 +1,8 @@
 -- Label pictures (find-labels Edge Function). Run through the SQL editor or
 -- the Supabase connector. Uses the same Vault secret as assess-wines.
 
--- Look for pictures for the next N wines (most bottles first). Each call
--- handles one wine, about 6-7 cents. "max" caps how many wines may have been
+-- Look for label pictures (one per vintage, plus a stand-in) for the next N wines. Each call
+-- handles one wine, about 10 cents. "max" caps how many wines may have been
 -- searched in total, so a test run stops by itself.
 select array_agg(net.http_post(
     url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/find-labels',

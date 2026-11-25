@@ -382,6 +382,7 @@ const WineRow = memo(function WineRow({
     >
       <LabelArt
         wineId={item.wineId}
+        vintageId={item.vintageId}
         name={item.wineName}
         vintage={item.vintage}
         colour={item.colour}

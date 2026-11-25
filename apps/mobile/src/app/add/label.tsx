@@ -8,7 +8,7 @@ import { Icon } from '../../components/Icon';
 import { canUseWebcam, WebCamera } from '../../components/WebCamera';
 import { Button, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
-import { savePhotoLabel } from '../../data/labels';
+import { labelFor, savePhotoLabel } from '../../data/labels';
 import { LabelError, readLabel } from '../../data/readLabel';
 import { MAX_SIDE, shrink } from '../../lib/photo';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
@@ -201,10 +201,16 @@ function ReadResult({
   }
 
   const go = () => {
-    // The owner's photo becomes the wine's picture, unless they already chose one.
-    const current = wineId ? data.labels.get(wineId) : undefined;
-    if (wineId && data.accountId && current?.source !== 'photo') {
-      savePhotoLabel(data.accountId, wineId, base64, current?.path ?? null)
+    // The owner's photo becomes this vintage's label (and the wine's, if it
+    // has none), unless they already chose their own photo for it.
+    const vintageId = wineId
+      ? (data.inventory.find((r) => r.wine_id === wineId && r.vintage === reading.vintage)
+          ?.vintage_id ?? null)
+      : null;
+    const current = wineId ? labelFor(data.labels, wineId, vintageId ?? undefined) : undefined;
+    const ownPhoto = current?.source === 'photo' && (current.level === 'vintage' || !vintageId);
+    if (wineId && data.accountId && !ownPhoto) {
+      savePhotoLabel(data.accountId, wineId, vintageId, base64, data.labels)
         .then(() => data.reload())
         .catch(() => {
           // A picture is a nice-to-have; adding the bottles carries on.

@@ -1,13 +1,16 @@
-// Supabase Edge Function: finds a label picture for one wine per call.
+// Supabase Edge Function: finds label pictures for one wine per call.
 //
-//   1. Claude Haiku searches the web for pages showing this wine's bottle:
-//      the winery's own page first, then the importer's, then a shop's.
-//      CellarTracker, Vinous, Vivino, Wine-Searcher and wine.com are never used.
+//   1. Claude Haiku searches the web for pages showing this wine's label, one
+//      per vintage owned where it can (labels often change by vintage), plus
+//      the winery's or importer's page. CellarTracker, Vinous, Vivino,
+//      Wine-Searcher and wine.com are never used.
 //   2. The function reads those pages (only where robots.txt allows) and
-//      collects the likely bottle pictures.
-//   3. Claude looks at the pictures and keeps one only if the producer and
-//      wine on the label match. Otherwise the wine keeps its monogram tile.
-//   4. The picture is saved in the private "labels" Storage bucket.
+//      collects the likely label and bottle pictures.
+//   3. Claude looks at the pictures: does the label match this wine, which
+//      year does it show, is it a label close-up or a whole bottle?
+//   4. Each vintage gets the picture showing its own year (close-ups first);
+//      the best picture of any year stands in for the wine's other vintages.
+//      Pictures are saved in the private "labels" Storage bucket.
 // The owner's own photos (label_source 'photo') are never replaced.
 //
 // Called by a database schedule or by hand through pg_net, like assess-wines:
@@ -21,7 +24,7 @@ import { encodeBase64 } from 'jsr:@std/encoding@1/base64';
 
 import {
   BLOCKED_DOMAINS,
-  chosen,
+  assign,
   cleanPages,
   describe,
   EXT,
@@ -43,8 +46,10 @@ import {
 } from './prompt.ts';
 
 const DEFAULT_ACCOUNT = 'b7a2bb88-b2c5-41f4-862c-17d95cd24b01';
-const UA = 'MySommelierLabelFinder/1.0 (personal wine-cellar app; one picture per wine)';
-const MAX_PICTURES = 6;
+const UA = 'MySommelierLabelFinder/1.0 (personal wine-cellar app; one label picture per wine)';
+const MAX_PICTURES = 14;
+const PER_PAGE = 3;
+const MAX_TOTAL_BYTES = 16_000_000; // keeps the request under Claude's size limit
 const MAX_BYTES = 3_500_000; // keeps the base64 under Claude's 5 MB image limit
 const MIN_BYTES = 6_000; // smaller is an icon or a thumbnail
 
@@ -129,21 +134,28 @@ Deno.serve(async (req) => {
       return reply(502, { wine: wine.name, error: 'search gave no answer' });
     }
 
-    // 2. Collect pictures from them.
+    // 2. Collect pictures from them: a few per page, so every vintage's page
+    //    gets a look-in.
     const words = nameWords(wine);
     const pictures: { url: string; page: Page; title: string; bytes: Uint8Array; media: Media }[] =
       [];
+    let totalBytes = 0;
     for (const page of pages) {
       if (pictures.length >= MAX_PICTURES) break;
       const html = await readPage(page.url);
       if (!html) continue;
       usage.pages++;
       const title = pageTitle(html);
+      let fromPage = 0;
       for (const url of imageCandidates(html, page.url, words)) {
-        if (pictures.length >= MAX_PICTURES) break;
+        if (pictures.length >= MAX_PICTURES || fromPage >= PER_PAGE) break;
         if (isBlocked(url) || pictures.some((p) => p.url === url)) continue;
         const got = await download(url, page.url);
-        if (got) pictures.push({ url, page, title, ...got });
+        if (got && totalBytes + got.bytes.length <= MAX_TOTAL_BYTES) {
+          totalBytes += got.bytes.length;
+          pictures.push({ url, page, title, ...got });
+          fromPage++;
+        }
       }
     }
     usage.pictures = pictures.length;
@@ -152,49 +164,72 @@ Deno.serve(async (req) => {
       return reply(200, { wine: wine.name, result: 'none', pages, usage });
     }
 
-    // 3. Look at them.
+    // 3. Look at them, and match pictures to vintages by the year on the label.
     const look = await lookAt(client, wine, pictures, usage);
-    const pick = chosen(look, pictures.length);
-    if (pick == null) {
+    const { byVintage, wine: standIn } = assign(look, pictures.length, wine.vintages);
+    if (standIn == null && byVintage.size === 0) {
       await finish('none', { look, pages_tried: pages.map((p) => p.url) });
       return reply(200, { wine: wine.name, result: 'none', look, usage });
     }
-    const best = pictures[pick - 1];
 
-    // 4. Save it. Never over the owner's own photo.
-    const path = `${accountId}/${wine.id}-${crypto.randomUUID().slice(0, 8)}.${EXT[best.media]}`;
-    const { error: upError } = await db.storage
-      .from('labels')
-      .upload(path, best.bytes, { contentType: best.media, upsert: false });
-    if (upError) {
-      await finish('failed', { error: `upload: ${upError.message}` });
-      return reply(500, { wine: wine.name, error: upError.message });
+    // 4. Save them. Never over the owner's own photos.
+    const saved = new Map<number, string>(); // picture number -> storage path
+    const save = async (n: number): Promise<string> => {
+      const have = saved.get(n);
+      if (have) return have;
+      const pic = pictures[n - 1];
+      const path = `${accountId}/${wine.id}-${crypto.randomUUID().slice(0, 8)}.${EXT[pic.media]}`;
+      const { error } = await db.storage
+        .from('labels')
+        .upload(path, pic.bytes, { contentType: pic.media, upsert: false });
+      if (error) throw new Error(`upload: ${error.message}`);
+      saved.set(n, path);
+      return path;
+    };
+    const fields = (n: number, path: string) => ({
+      label_path: path,
+      label_source: 'web',
+      label_page_url: pictures[n - 1].page.url,
+      label_image_url: pictures[n - 1].url,
+    });
+
+    const vintagesDone: Record<string, number | null> = {};
+    for (const [vintageId, n] of byVintage) {
+      const path = await save(n);
+      const { data: up } = await db
+        .from('vintages')
+        .update(fields(n, path))
+        .eq('id', vintageId)
+        .or('label_source.is.null,label_source.eq.web')
+        .select('id');
+      vintagesDone[vintageId] = up?.length ? n : null;
     }
-    const { data: updated, error: saveError } = await db
-      .from('wines')
-      .update({
-        label_path: path,
-        label_source: 'web',
-        label_page_url: best.page.url,
-        label_image_url: best.url,
-        label_search_result: 'found',
-        label_search_usage: { ...usage, look },
-      })
-      .eq('id', wine.id)
-      .is('label_path', null)
-      .select('id');
-    if (saveError || !updated?.length) {
-      // The owner added a photo meanwhile, or the save failed: tidy up.
-      await db.storage.from('labels').remove([path]);
-      if (saveError) await finish('failed', { error: `save: ${saveError.message}` });
-      return reply(200, { wine: wine.name, result: 'kept existing picture' });
+    let wineDone = false;
+    if (standIn != null) {
+      const path = await save(standIn);
+      const { data: up } = await db
+        .from('wines')
+        .update(fields(standIn, path))
+        .eq('id', wine.id)
+        .or('label_source.is.null,label_source.eq.web')
+        .select('id');
+      wineDone = !!up?.length;
     }
+    // Tidy up any picture that ended up unused (the owner added a photo meanwhile).
+    const used = new Set<number>([
+      ...Object.values(vintagesDone).filter((n): n is number => n != null),
+      ...(wineDone && standIn != null ? [standIn] : []),
+    ]);
+    const unused = [...saved].filter(([n]) => !used.has(n)).map(([, path]) => path);
+    if (unused.length) await db.storage.from('labels').remove(unused);
+
+    await finish('found', { look, vintages: Object.keys(vintagesDone).length });
     return reply(200, {
       wine: wine.name,
       result: 'found',
-      page: best.page,
-      image: best.url,
-      shows: look?.pictures.find((p) => p.number === pick)?.shows,
+      vintages: Object.fromEntries(
+        wine.vintages.map((v) => [v.year ?? 'NV', byVintage.has(v.id) ? 'own label' : 'stand-in']),
+      ),
       usage,
     });
   } catch (e) {
@@ -209,10 +244,18 @@ Deno.serve(async (req) => {
 async function loadWine(db: any, id: string): Promise<WineIn | null> {
   const { data: w } = await db
     .from('wines')
-    .select('id,name,producer,country,region,appellation,colour,vintages(year)')
+    .select(
+      'id,name,producer,country,region,appellation,colour,' +
+        'vintages(id,year,holdings(quantity,quantity_on_order))',
+    )
     .eq('id', id)
     .single();
   if (!w) return null;
+  type V = {
+    id: string;
+    year: number | null;
+    holdings: { quantity: number; quantity_on_order: number }[];
+  };
   return {
     id: w.id,
     name: w.name,
@@ -221,10 +264,10 @@ async function loadWine(db: any, id: string): Promise<WineIn | null> {
     region: w.region,
     appellation: w.appellation,
     colour: w.colour,
-    years: (w.vintages ?? [])
-      .map((v: { year: number | null }) => v.year)
-      .filter((y: number | null): y is number => typeof y === 'number')
-      .sort(),
+    vintages: ((w.vintages ?? []) as V[])
+      .filter((v) => (v.holdings ?? []).some((h) => h.quantity + h.quantity_on_order > 0))
+      .map((v) => ({ id: v.id, year: v.year }))
+      .sort((a, b) => (a.year ?? 0) - (b.year ?? 0)),
   };
 }
 
@@ -247,7 +290,7 @@ async function findPages(
           {
             type: 'web_search_20250305',
             name: 'web_search',
-            max_uses: 3,
+            max_uses: 4,
             blocked_domains: BLOCKED_DOMAINS,
           },
           PAGES_TOOL as unknown as Anthropic.Beta.BetaTool,
@@ -369,7 +412,7 @@ async function lookAt(
   content.push({ type: 'text', text: `The wine we want:\n${describe(wine)}` });
   const message = await client.beta.messages.create({
     model: LOOK_MODEL,
-    max_tokens: 3000,
+    max_tokens: 6000,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: LOOK_SCHEMA } },
     system: LOOK_SYSTEM,
     messages: [{ role: 'user', content }],

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 import { supabase } from '../lib/supabase';
 import { fillInWines } from './enrich';
-import { loadLabels, type WineLabel } from './labels';
+import { loadLabels, NO_LABELS, type Labels } from './labels';
 import { savePalate } from './writes';
 import {
   bestScoreByVintage,
@@ -38,8 +38,8 @@ type CellarData = {
   /** "What critics and drinkers say" for each vintage, by vintage id. */
   critics: Map<string, CriticsSay>;
   bestScores: Map<string, Score>;
-  /** The label picture of each wine that has one, by wine id (else the monogram tile). */
-  labels: Map<string, WineLabel>;
+  /** Label pictures by wine and by vintage (see labelFor); none = the monogram tile. */
+  labels: Labels;
   /** Bottles bought and drunk per vintage (all cellars), for the palate profile. */
   drinking: VintageDrinking[];
   /** The taste quiz answers and lines marked "not really"; null until saved once. */
@@ -219,7 +219,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     notes: [],
     maturity: new Map(),
     critics: new Map(),
-    labels: new Map(),
+    labels: NO_LABELS,
     drinking: [],
     palateSettings: null,
   });
