@@ -39,39 +39,38 @@ comment on column public.wines.label_image_url is 'For a web picture: the origin
 comment on column public.wines.label_searched_at is 'When find-labels last looked for a picture.';
 comment on column public.wines.label_search_result is 'found | none | failed, from the last search.';
 
--- The bucket: private, images only, at most 10 MB each.
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('labels', 'labels', false, 10485760,
-        array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
-on conflict (id) do nothing;
+-- The bucket: private, images only, at most 10 MB each. Members of an
+-- account see its pictures; owners and editors add and change them. The first
+-- folder of the path is the account id. Skipped where there is no Supabase
+-- Storage (the plain-Postgres test database).
+do $$
+declare
+  readable text := '(storage.foldername(name))[1] in (select private.readable_account_ids()::text)';
+  writable text := '(storage.foldername(name))[1] in (select private.writable_account_ids()::text)';
+begin
+  if to_regclass('storage.buckets') is null then
+    return;
+  end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('labels', 'labels', false, 10485760,
+          array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+  on conflict (id) do nothing;
 
--- Members of an account see its pictures; owners and editors add and change
--- them. The first folder of the path is the account id.
-drop policy if exists "labels: members read" on storage.objects;
-create policy "labels: members read" on storage.objects
-  for select to authenticated
-  using (bucket_id = 'labels'
-         and (storage.foldername(name))[1] in (select private.readable_account_ids()::text));
-
-drop policy if exists "labels: writers insert" on storage.objects;
-create policy "labels: writers insert" on storage.objects
-  for insert to authenticated
-  with check (bucket_id = 'labels'
-              and (storage.foldername(name))[1] in (select private.writable_account_ids()::text));
-
-drop policy if exists "labels: writers update" on storage.objects;
-create policy "labels: writers update" on storage.objects
-  for update to authenticated
-  using (bucket_id = 'labels'
-         and (storage.foldername(name))[1] in (select private.writable_account_ids()::text))
-  with check (bucket_id = 'labels'
-              and (storage.foldername(name))[1] in (select private.writable_account_ids()::text));
-
-drop policy if exists "labels: writers delete" on storage.objects;
-create policy "labels: writers delete" on storage.objects
-  for delete to authenticated
-  using (bucket_id = 'labels'
-         and (storage.foldername(name))[1] in (select private.writable_account_ids()::text));
+  drop policy if exists "labels: members read" on storage.objects;
+  execute format('create policy "labels: members read" on storage.objects for select '
+                 'to authenticated using (bucket_id = %L and %s)', 'labels', readable);
+  drop policy if exists "labels: writers insert" on storage.objects;
+  execute format('create policy "labels: writers insert" on storage.objects for insert '
+                 'to authenticated with check (bucket_id = %L and %s)', 'labels', writable);
+  drop policy if exists "labels: writers update" on storage.objects;
+  execute format('create policy "labels: writers update" on storage.objects for update '
+                 'to authenticated using (bucket_id = %L and %s) with check (bucket_id = %L and %s)',
+                 'labels', writable, 'labels', writable);
+  drop policy if exists "labels: writers delete" on storage.objects;
+  execute format('create policy "labels: writers delete" on storage.objects for delete '
+                 'to authenticated using (bucket_id = %L and %s)', 'labels', writable);
+end;
+$$;
 
 -- The next wine to look for a picture for: held wines with most bottles
 -- first, no picture yet, never searched (or a failed search over a day ago).
