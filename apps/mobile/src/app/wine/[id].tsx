@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Stars } from '../../components/controls';
 import { Icon } from '../../components/Icon';
-import { LabelArt } from '../../components/LabelArt';
+import { LabelPicture } from '../../components/LabelPicture';
 import { RipenessBar } from '../../components/RipenessBar';
 import { FoodMatches } from '../../components/FoodMatches';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
@@ -236,11 +236,12 @@ export default function WinePage() {
       <TopBar onBack={back} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.hero}>
-          <LabelArt
+          <LabelPicture
+            wineId={wine.wine_id}
+            vintageId={wine.vintage_id}
             name={wine.wine_name}
             vintage={wine.vintage}
             colour={wine.colour}
-            size="large"
           />
           <View style={{ alignItems: 'center', gap: space.xs }}>
             <T variant="title" style={{ textAlign: 'center' }}>

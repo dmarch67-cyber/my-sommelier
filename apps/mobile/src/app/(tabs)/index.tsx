@@ -566,7 +566,13 @@ function SommelierCard({
                 accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}`}
                 style={({ pressed }) => [styles.sommelierRow, pressed && { opacity: 0.7 }]}
               >
-                <LabelArt name={item.wineName} vintage={item.vintage} colour={item.colour} />
+                <LabelArt
+                  wineId={item.wineId}
+                  vintageId={item.vintageId}
+                  name={item.wineName}
+                  vintage={item.vintage}
+                  colour={item.colour}
+                />
                 <View style={{ flex: 1, gap: 2 }}>
                   <T variant="bodyStrong" numberOfLines={2}>
                     {item.vintage ?? 'NV'} {item.wineName}
@@ -620,7 +626,13 @@ const PickCard = memo(function PickCard({
       accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}, ${ready.label}`}
       style={({ pressed }) => [styles.card, pressed && { backgroundColor: colors.surface }]}
     >
-      <LabelArt name={item.wineName} vintage={item.vintage} colour={item.colour} />
+      <LabelArt
+        wineId={item.wineId}
+        vintageId={item.vintageId}
+        name={item.wineName}
+        vintage={item.vintage}
+        colour={item.colour}
+      />
       <View style={styles.cardBody}>
         <T variant="bodyStrong" numberOfLines={2}>
           {item.vintage ?? 'NV'} {item.wineName}

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { supabase } from '../lib/supabase';
 import { fillInWines } from './enrich';
+import { loadLabels, NO_LABELS, type Labels } from './labels';
 import { savePalate } from './writes';
 import {
   bestScoreByVintage,
@@ -37,6 +38,8 @@ type CellarData = {
   /** "What critics and drinkers say" for each vintage, by vintage id. */
   critics: Map<string, CriticsSay>;
   bestScores: Map<string, Score>;
+  /** Label pictures by wine and by vintage (see labelFor); none = the monogram tile. */
+  labels: Labels;
   /** Bottles bought and drunk per vintage (all cellars), for the palate profile. */
   drinking: VintageDrinking[];
   /** The taste quiz answers and lines marked "not really"; null until saved once. */
@@ -179,15 +182,18 @@ async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
 }
 
 async function loadAll(): Promise<Loaded> {
-  const [cellars, inventory, scores, accolades, notes, reviews, palate] = await Promise.all([
-    fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
-    fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
-    fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
-    fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
-    loadNotes(),
-    loadReviews(),
-    loadPalate(),
-  ]);
+  const [cellars, inventory, scores, accolades, notes, reviews, palate, labels] = await Promise.all(
+    [
+      fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
+      fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
+      fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
+      fetchAll<Accolade>('accolades', 'id,vintage_id,raw_text,publication,title,rank,year', 'id'),
+      loadNotes(),
+      loadReviews(),
+      loadPalate(),
+      loadLabels(),
+    ],
+  );
   return {
     status: 'ready',
     error: null,
@@ -198,6 +204,7 @@ async function loadAll(): Promise<Loaded> {
     notes,
     ...reviews,
     ...palate,
+    labels,
   };
 }
 
@@ -212,6 +219,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     notes: [],
     maturity: new Map(),
     critics: new Map(),
+    labels: NO_LABELS,
     drinking: [],
     palateSettings: null,
   });
