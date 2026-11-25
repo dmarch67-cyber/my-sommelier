@@ -384,13 +384,24 @@ async function recheck(
   ) {
     return reply(409, { error: 'Already rechecking this wine. Give it a minute.' });
   }
-  if (rows.length >= DAILY_LIMIT) {
+  // The daily cap guards the app's button; a batch run with the ops secret
+  // (the recalibration of every window) is capped by its own schedule.
+  if (
+    !secret &&
+    rows.filter((r) => !(r as { usage?: { batch?: boolean } }).usage?.batch).length >= DAILY_LIMIT
+  ) {
     return reply(429, { error: `That's ${DAILY_LIMIT} rechecks today. Try again tomorrow.` });
   }
 
   const before = { drink_from: v.drink_from, drink_to: v.drink_to };
-  const usage: RecheckUsage & { mode: string; vintage_id: string; pipeline: number } = {
+  const usage: RecheckUsage & {
+    mode: string;
+    batch: boolean;
+    vintage_id: string;
+    pipeline: number;
+  } = {
     mode: 'recheck',
+    batch: Boolean(secret),
     vintage_id: vintageId,
     pipeline: 3,
     reader_input: 0,
