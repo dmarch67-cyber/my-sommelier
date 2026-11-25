@@ -10,6 +10,7 @@ import { RipenessBar } from '../../components/RipenessBar';
 import { CriticNotes } from '../../components/CriticNotes';
 import { FoodMatches } from '../../components/FoodMatches';
 import { MoveBottles, type MoveRequest } from '../../components/MoveBottles';
+import { RecheckWindow } from '../../components/RecheckWindow';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { formatDay } from '../../lib/format';
@@ -362,6 +363,11 @@ export default function WinePage() {
             <RipenessBar
               r={view.ripeness}
               estimate={view.wine.drink_window_source === 'estimate'}
+            />
+            <RecheckWindow
+              key={wine.vintage_id}
+              vintageId={wine.vintage_id}
+              onSaved={() => data.reload()}
             />
           </Card>
         </Section>

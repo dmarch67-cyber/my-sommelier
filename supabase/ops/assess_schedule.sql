@@ -51,3 +51,14 @@ $$);
 -- Cost so far this month:
 --   select count(*), sum((usage->>'searches')::int) from public.wine_assessments
 --   where ok and started_at > now() - interval '30 days';
+
+-- 5. Recheck one vintage by hand (the same as "Recheck window" on the Wine
+--    page; ~5-15 cents). The answer lands in net._http_response.
+-- select net.http_post(
+--   url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/assess-wines',
+--   headers := jsonb_build_object('Content-Type', 'application/json', 'x-assess-secret',
+--     (select decrypted_secret from vault.decrypted_secrets where name = 'assess_secret')),
+--   body := '{"vintage_id": "<vintage id>"}'::jsonb,
+--   timeout_milliseconds := 300000);
+-- Cost of rechecks: select count(*), sum((usage->>'cost_usd')::numeric)
+--   from public.wine_assessments where usage->>'mode' = 'recheck';
