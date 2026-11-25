@@ -224,3 +224,6 @@ export function buildAskRows(input: {
 export function answerWineIds(answer: { wine_ids: string[]; list_ids?: string[] }): string[] {
   return [...new Set([...answer.wine_ids, ...(answer.list_ids ?? [])])];
 }
+
+/** How many wines an answer lists before "Show all". */
+export const ANSWER_PAGE = 25;

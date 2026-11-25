@@ -26,7 +26,7 @@ import {
   type CellarItem,
   type SortKey,
 } from '../../logic/cellar';
-import { answerWineIds, buildAskRows, looksLikeQuestion } from '../../logic/ask';
+import { ANSWER_PAGE, answerWineIds, buildAskRows, looksLikeQuestion } from '../../logic/ask';
 import { palateText } from '../../logic/palate';
 
 type AskState = {
@@ -48,6 +48,7 @@ export default function CellarScreen() {
   const [filter, setFilter] = useLastCellar(data.cellars.map((c) => c.id));
   const [query, setQuery] = useState('');
   const [ask, setAsk] = useState<AskState | null>(null);
+  const [showAllAnswer, setShowAllAnswer] = useState(false);
   const askSeq = useRef(0);
   const [sort, setSort] = useState<SortKey>('ready');
   const year = new Date().getFullYear();
@@ -111,6 +112,7 @@ export default function CellarScreen() {
   const runAsk = useCallback(
     async (question: string) => {
       const seq = ++askSeq.current;
+      setShowAllAnswer(false);
       setAsk({ question, status: 'loading' });
       try {
         const answer = await askCellar({
@@ -246,7 +248,11 @@ export default function CellarScreen() {
       {ask ? <AnswerCard ask={ask} onRetry={() => runAsk(ask.question)} /> : null}
       {ask?.status === 'done' && ask.answer?.list_ids && answerItems.length > 0 ? (
         <T variant="caption" style={styles.listCaption}>
-          {answerItems.length === 1 ? 'The wine' : `All ${answerItems.length} wines`}
+          {answerItems.length === 1
+            ? 'The wine'
+            : answerItems.length > ANSWER_PAGE && !showAllAnswer
+              ? `${ANSWER_PAGE} of ${answerItems.length} wines`
+              : `All ${answerItems.length} wines`}
         </T>
       ) : null}
 
@@ -285,7 +291,20 @@ export default function CellarScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <FlatList
-        data={asking ? answerItems : shown}
+        data={asking ? (showAllAnswer ? answerItems : answerItems.slice(0, ANSWER_PAGE)) : shown}
+        ListFooterComponent={
+          asking && !showAllAnswer && answerItems.length > ANSWER_PAGE ? (
+            <Pressable
+              onPress={() => setShowAllAnswer(true)}
+              accessibilityRole="button"
+              style={styles.showAll}
+            >
+              <T variant="bodyStrong" style={{ color: colors.accent }}>
+                Show all {answerItems.length} wines
+              </T>
+            </Pressable>
+          ) : undefined
+        }
         keyExtractor={(i) => i.vintageId}
         ListHeaderComponent={header}
         renderItem={({ item }) => (
@@ -490,6 +509,7 @@ const styles = StyleSheet.create({
   scoreText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.accent },
   separator: { height: 1, backgroundColor: colors.border, marginLeft: space.lg + 48 + space.md },
   empty: { padding: space.xxl, alignItems: 'center' },
+  showAll: { alignItems: 'center', paddingVertical: space.lg },
   listCaption: { marginTop: -space.sm, marginBottom: space.xs },
   askLink: { fontFamily: fonts.medium, color: colors.accent },
   answer: {
