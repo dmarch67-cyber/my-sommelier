@@ -596,7 +596,7 @@ How to answer:
 - Say which cellar(s) the answer covers when it matters.
 - If nothing matches, say so plainly and suggest the closest thing they do have.
 - "wine_ids": the ids of up to ${MAX_CARDS} wines you name or recommend, best first, so the app can show them first. Use ids exactly as find_wines returned them.
-- "list_lookup": whenever the answer gives a number of wines or talks about a set of wines ("48 wines end in 2027", "your Bordeaux in Paris"), the lookup_number of the find_wines call whose matches are exactly that set. The app then lists every one of them under your answer, so the number you give must equal that lookup's matched.wines. Null when the answer is not about a set of wines.
+- "list_lookup": whenever the answer is about wines in the cellar (a count, a set like "your Bordeaux in Paris", or picks from a wider search like "your best Pinots"), the lookup_number of the find_wines call whose matches the owner would want to browse. The app lists those wines under your answer (25 at first, all on request), with your wine_ids first. If you give a number of wines, it must equal that lookup's matched.wines. Null only when the answer is not about wines in the cellar.
 - Answer exactly what was asked. If they ask which wines end in 2027, count only windows ending in 2027 (window_ends_from and window_ends_to both 2027), not earlier ones.`;
 
 export function contextText(opts: {
@@ -637,7 +637,16 @@ export function cleanAnswer(
     if (wine_ids.length >= MAX_CARDS) break;
   }
   const n = typeof o.list_lookup === 'number' ? Math.round(o.list_lookup) : 0;
-  const lookup = n >= 1 && n <= lookups.length ? lookups[n - 1] : null;
+  let lookup = n >= 1 && n <= lookups.length ? lookups[n - 1] : null;
+  // No lookup named but wines picked: list the latest lookup the picks came from,
+  // so the owner can browse beyond the few picks.
+  if (!lookup && wine_ids.length) {
+    lookup =
+      [...lookups].reverse().find((q) => {
+        const ids = new Set(allMatchIds(rows, q));
+        return wine_ids.every((id) => ids.has(id));
+      }) ?? null;
+  }
   if (!lookup) return { answer, wine_ids };
   return { answer, wine_ids, list_ids: allMatchIds(rows, lookup) };
 }

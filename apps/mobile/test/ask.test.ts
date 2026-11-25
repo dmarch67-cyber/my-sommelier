@@ -301,3 +301,40 @@ test('an answer that counts wines lists every one of them', () => {
   );
   assert.equal(allMatchIds(rows, { window_ends_to: 2026 }).length, 1);
 });
+
+test('picks with no lookup named still get the lookup they came from as the list', () => {
+  const inv: InventoryRow[] = [];
+  for (let i = 0; i < 30; i++) inv.push(line({ grapes: ['Pinot Noir'], wine_name: `Pinot ${i}` }));
+  inv.push(line({ grapes: ['Syrah'] }));
+  const rows = rowsFrom(inv);
+  const lookups: Parameters<typeof cleanAnswer>[2] = [];
+  runTool(rows, 'find_wines', { grape: 'syrah' }, [], lookups);
+  const pinots = runTool(
+    rows,
+    'find_wines',
+    { grape: 'pinot', sort: 'best_score', limit: 3 },
+    [],
+    lookups,
+  ) as {
+    wines: { id: string }[];
+  };
+  const a = cleanAnswer(
+    {
+      answer: 'Your best Pinots are these three.',
+      wine_ids: pinots.wines.map((w) => w.id),
+      list_lookup: null,
+    },
+    rows,
+    lookups,
+  )!;
+  assert.equal(a.list_ids!.length, 30);
+  assert.deepEqual(
+    answerWineIds(a).slice(0, 3),
+    pinots.wines.map((w) => w.id),
+  );
+  // A general answer with no wines gets no list.
+  assert.equal(
+    cleanAnswer({ answer: 'Decant it.', wine_ids: [], list_lookup: null }, rows, lookups)!.list_ids,
+    undefined,
+  );
+});
