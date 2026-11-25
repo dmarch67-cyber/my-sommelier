@@ -340,7 +340,8 @@ function usable(look: Look | null, count: number): Seen[] {
  * Which picture (by number) goes on each vintage, and which one stands in for
  * the wine as a whole. Every picture used must have the wine's name readable
  * on its label. A vintage only gets a picture whose label shows its own year
- * (close-ups first). The stand-in must be a label close-up, newest year first.
+ * (close-ups first). The stand-in must show its year: close-ups first, then
+ * whole bottles, newest year first.
  */
 export function assign(
   look: Look | null,
@@ -356,8 +357,16 @@ export function assign(
   }
   const wine =
     good
-      .filter((p) => p.view === 'label')
-      .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.number - b.number)[0]?.number ?? null;
+      // A stand-in must show a real label with its year readable (shops often
+      // show a plain placeholder label with no year). Whole bottles are fine;
+      // close-ups first, then the newest year.
+      .filter((p) => p.year != null)
+      .sort(
+        (a, b) =>
+          (a.view === b.view ? 0 : a.view === 'label' ? -1 : 1) ||
+          (b.year as number) - (a.year as number) ||
+          a.number - b.number,
+      )[0]?.number ?? null;
   return { byVintage, wine };
 }
 

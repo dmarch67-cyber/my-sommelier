@@ -100,10 +100,13 @@ test('gives each vintage the label showing its own year, close-ups first', () =>
   assert.deepEqual(assign({ pictures: [seen(1, 2018, 'other')] }, 1, vintages).wine, null);
   assert.equal(assign(null, 0, vintages).byVintage.size, 0);
   assert.equal(assign({ pictures: [seen(9, 2018, 'label')] }, 2, vintages).wine, null);
-  // A whole bottle can be a vintage's own label but never the stand-in.
+  // A whole bottle with its year readable can stand in when there is no close-up.
   const bottleOnly = assign({ pictures: [seen(1, 2019, 'bottle')] }, 1, vintages);
   assert.deepEqual(Object.fromEntries(bottleOnly.byVintage), { v19: 1 });
-  assert.equal(bottleOnly.wine, null);
+  assert.equal(bottleOnly.wine, 1);
+  // A picture with no readable year (a shop's placeholder label) never stands in.
+  assert.equal(assign({ pictures: [seen(1, null, 'label')] }, 1, vintages).wine, null);
+  assert.equal(assign({ pictures: [seen(1, null, 'bottle')] }, 1, vintages).wine, null);
 });
 
 test('recognises picture formats from their bytes', () => {
