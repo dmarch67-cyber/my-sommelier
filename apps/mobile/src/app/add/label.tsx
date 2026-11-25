@@ -1,4 +1,3 @@
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -9,7 +8,9 @@ import { Icon } from '../../components/Icon';
 import { canUseWebcam, WebCamera } from '../../components/WebCamera';
 import { Button, T } from '../../components/ui';
 import { useCellarData } from '../../data/CellarData';
+import { savePhotoLabel } from '../../data/labels';
 import { LabelError, readLabel } from '../../data/readLabel';
+import { MAX_SIDE, shrink } from '../../lib/photo';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 import { findWines } from '../../logic/adding';
 import {
@@ -20,32 +21,12 @@ import {
   type LabelReading,
 } from '../../logic/label';
 
-/** Claude reads labels best at up to about 1,500 pixels on the long side; bigger only costs more. */
-const MAX_SIDE = 1568;
-
 type State =
   | { step: 'pick' }
   | { step: 'webcam' }
-  | { step: 'reading'; uri: string }
-  | { step: 'read'; uri: string; reading: LabelReading }
-  | { step: 'failed'; uri: string | null; message: string; setup: boolean };
-
-async function shrink(
-  asset: ImagePicker.ImagePickerAsset,
-): Promise<{ uri: string; base64: string }> {
-  const long = Math.max(asset.width || 0, asset.height || 0);
-  const actions =
-    long > MAX_SIDE
-      ? [{ resize: asset.width >= asset.height ? { width: MAX_SIDE } : { height: MAX_SIDE } }]
-      : [];
-  const out = await manipulateAsync(asset.uri, actions, {
-    compress: 0.8,
-    format: SaveFormat.JPEG,
-    base64: true,
-  });
-  if (!out.base64) throw new Error('Could not read that photo.');
-  return { uri: out.uri, base64: out.base64.replace(/^data:[^,]*,/, '') };
-}
+  | { step: 'reading'; uri: string; base64?: string }
+  | { step: 'read'; uri: string; base64: string; reading: LabelReading }
+  | { step: 'failed'; uri: null; message: string; setup: boolean };
 
 export default function LabelScreen() {
   const data = useCellarData();
@@ -58,7 +39,7 @@ export default function LabelScreen() {
     setState({ step: 'reading', uri: photo.uri });
     try {
       const reading = await readLabel(photo.base64, 'image/jpeg', known);
-      setState({ step: 'read', uri: photo.uri, reading });
+      setState({ step: 'read', uri: photo.uri, base64: photo.base64, reading });
     } catch (e) {
       fail(e);
     }
@@ -152,6 +133,7 @@ export default function LabelScreen() {
         {state.step === 'read' && (
           <ReadResult
             uri={state.uri}
+            base64={state.base64}
             reading={state.reading}
             onAgain={() => setState({ step: 'pick' })}
           />
@@ -178,10 +160,12 @@ export default function LabelScreen() {
 
 function ReadResult({
   uri,
+  base64,
   reading,
   onAgain,
 }: {
   uri: string;
+  base64: string;
   reading: LabelReading;
   onAgain: () => void;
 }) {
@@ -216,7 +200,18 @@ function ReadResult({
     );
   }
 
-  const go = () => router.replace({ pathname: '/add/manual', params: addParams(reading, wineId) });
+  const go = () => {
+    // The owner's photo becomes the wine's picture, unless they already chose one.
+    const current = wineId ? data.labels.get(wineId) : undefined;
+    if (wineId && data.accountId && current?.source !== 'photo') {
+      savePhotoLabel(data.accountId, wineId, base64, current?.path ?? null)
+        .then(() => data.reload())
+        .catch(() => {
+          // A picture is a nice-to-have; adding the bottles carries on.
+        });
+    }
+    router.replace({ pathname: '/add/manual', params: addParams(reading, wineId) });
+  };
 
   return (
     <View style={{ gap: space.lg }}>

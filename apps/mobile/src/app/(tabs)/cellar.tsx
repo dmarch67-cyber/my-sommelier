@@ -380,7 +380,12 @@ const WineRow = memo(function WineRow({
       accessibilityLabel={`${item.wineName} ${item.vintage ?? 'NV'}`}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface }]}
     >
-      <LabelArt name={item.wineName} vintage={item.vintage} colour={item.colour} />
+      <LabelArt
+        wineId={item.wineId}
+        name={item.wineName}
+        vintage={item.vintage}
+        colour={item.colour}
+      />
       <View style={styles.rowBody}>
         <T variant="bodyStrong" numberOfLines={2}>
           {item.wineName} <T style={styles.vintage}>{item.vintage ?? 'NV'}</T>
