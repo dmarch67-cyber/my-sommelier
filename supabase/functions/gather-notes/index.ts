@@ -25,9 +25,11 @@ import {
   budget,
   cleanNotes,
   cleanPages,
+  dedupe,
   describe,
   focus,
   isBlocked,
+  noteKey,
   NOTES_SCHEMA,
   type Page,
   pagesTool,
@@ -48,6 +50,7 @@ const UA = 'MySommelierNotes/1.0 (personal wine-cellar app; reads public tasting
 const PAGE_CHARS = 14_000; // about 3,500 tokens of each page
 const MAX_PDFS = 3;
 const MAX_PDF_BYTES = 4_000_000;
+const PAGES_PER_READ = 3;
 
 type Usage = {
   search_input: number;
@@ -59,6 +62,8 @@ type Usage = {
   pages_read: number;
   notes: number;
   rejected: number;
+  read_errors: string[];
+  rejected_samples: string[];
 };
 
 function reply(status: number, body: unknown): Response {
@@ -118,6 +123,8 @@ Deno.serve(async (req) => {
     pages_read: 0,
     notes: 0,
     rejected: 0,
+    read_errors: [],
+    rejected_samples: [],
   };
   const finish = async (
     result: 'found' | 'none' | 'failed',
@@ -145,14 +152,13 @@ Deno.serve(async (req) => {
     }
     usage.pages_tried = pages.length;
 
-    // 2. Read them.
+    // 2. Read them, all at once (a few PDF tech sheets at most).
+    const got = await Promise.all(pages.map((page) => readPage(page.url)));
     const read: (ReadPage & { bytes?: Uint8Array })[] = [];
     let pdfs = 0;
-    for (const page of pages) {
-      const got = await readPage(page.url, pdfs < MAX_PDFS);
-      if (!got) continue;
-      if (got.pdf) pdfs++;
-      read.push(got);
+    for (const g of got) {
+      if (!g || (g.pdf && ++pdfs > MAX_PDFS)) continue;
+      read.push(g);
     }
     usage.pages_read = read.length;
     if (read.length === 0) {
@@ -163,8 +169,22 @@ Deno.serve(async (req) => {
     // 3. Take out the notes.
     const raw = await takeNotes(client, wine, read, usage);
     const year = new Date().getFullYear();
-    const { notes, rejected } = cleanNotes(raw, wine, read, year);
-    usage.rejected = rejected;
+    const cleaned = cleanNotes(raw, wine, read, year);
+    usage.rejected = cleaned.rejected;
+    usage.rejected_samples = cleaned.samples;
+    const { data: had } = await db
+      .from('critic_notes')
+      .select('vintage_id,note')
+      .in(
+        'vintage_id',
+        wine.vintages.map((v) => v.id),
+      );
+    const saved = new Set<string>(
+      ((had ?? []) as { vintage_id: string; note: string }[]).map((h) =>
+        noteKey(h.vintage_id, h.note),
+      ),
+    );
+    const notes = dedupe(cleaned.notes, saved);
 
     // 4. Save them, and have the critics summaries rewritten with them.
     let added = 0;
@@ -308,10 +328,7 @@ async function allowedByRobots(url: string): Promise<boolean> {
 }
 
 /** Step 2: one page's text (or a PDF tech sheet), if robots.txt allows and it loads. */
-async function readPage(
-  url: string,
-  pdfOk: boolean,
-): Promise<(ReadPage & { bytes?: Uint8Array }) | null> {
+async function readPage(url: string): Promise<(ReadPage & { bytes?: Uint8Array }) | null> {
   try {
     if (isBlocked(url) || !(await allowedByRobots(url))) return null;
     const r = await fetch(url, {
@@ -322,7 +339,7 @@ async function readPage(
     if (!r.ok || isBlocked(r.url || url)) return null;
     const type = r.headers.get('content-type') ?? '';
     if (type.includes('pdf')) {
-      if (!pdfOk || Number(r.headers.get('content-length') ?? 0) > MAX_PDF_BYTES) return null;
+      if (Number(r.headers.get('content-length') ?? 0) > MAX_PDF_BYTES) return null;
       const bytes = new Uint8Array(await r.arrayBuffer());
       if (bytes.length > MAX_PDF_BYTES) return null;
       return { url, site: site(url), text: null, pdf: true, bytes };
@@ -336,15 +353,45 @@ async function readPage(
   }
 }
 
-/** Step 3: Haiku reads the pages and takes out the notes, word for word. */
+/**
+ * Step 3: Haiku reads the pages and takes out the notes, word for word. Pages
+ * go in small groups at once, so a wine with many vintages and pages still
+ * finishes in time; a group that fails is skipped rather than losing the rest.
+ */
 async function takeNotes(
   client: Anthropic,
   wine: WineIn,
   pages: (ReadPage & { bytes?: Uint8Array })[],
   usage: Usage,
-): Promise<unknown> {
+): Promise<{ notes: unknown[] }> {
+  const groups: number[][] = [];
+  for (let i = 0; i < pages.length; i += PAGES_PER_READ) {
+    groups.push(pages.slice(i, i + PAGES_PER_READ).map((_, j) => i + j));
+  }
+  const answers = await Promise.all(
+    groups.map((g) =>
+      readGroup(client, wine, pages, g, usage).catch((e) => {
+        usage.read_errors.push(String(e).slice(0, 120));
+        return [] as unknown[];
+      }),
+    ),
+  );
+  if (answers.every((a) => a.length === 0) && usage.read_errors.length === groups.length) {
+    throw new Error(`reader failed: ${usage.read_errors[0]}`);
+  }
+  return { notes: answers.flat() };
+}
+
+async function readGroup(
+  client: Anthropic,
+  wine: WineIn,
+  pages: (ReadPage & { bytes?: Uint8Array })[],
+  group: number[],
+  usage: Usage,
+): Promise<unknown[]> {
   const content: Anthropic.Beta.BetaContentBlockParam[] = [{ type: 'text', text: readText(wine) }];
-  pages.forEach((p, i) => {
+  for (const i of group) {
+    const p = pages[i];
     if (p.pdf && p.bytes) {
       content.push({ type: 'text', text: `Page ${i + 1} (${p.url}), a PDF:` });
       content.push({
@@ -357,11 +404,11 @@ async function takeNotes(
         text: `Page ${i + 1} (${p.url}):\n${focus(p.text ?? '', PAGE_CHARS)}`,
       });
     }
-  });
+  }
   const message = await client.beta.messages
     .stream({
       model: READ_MODEL,
-      max_tokens: 32000,
+      max_tokens: 24000,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTES_SCHEMA } },
       system: READ_SYSTEM,
       messages: [{ role: 'user', content }],
@@ -373,5 +420,6 @@ async function takeNotes(
   if (message.stop_reason !== 'end_turn' || !text || text.type !== 'text') {
     throw new Error(`reader stopped: ${message.stop_reason}`);
   }
-  return JSON.parse(text.text);
+  const notes = (JSON.parse(text.text) as { notes?: unknown }).notes;
+  return Array.isArray(notes) ? notes : [];
 }

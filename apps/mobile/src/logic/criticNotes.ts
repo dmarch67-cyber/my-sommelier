@@ -18,9 +18,33 @@ const ORDER: Record<CriticNote['kind'], number> = {
   winery: 3,
 };
 
-/** Critics first, newest first; the winery's own note last. */
+function noteWords(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 20)
+    .join(' ');
+}
+
+/**
+ * Critics first, newest first; the winery's own note last. The same note
+ * quoted by two shops is shown once (the dated copy, or the fuller name).
+ */
 export function sortNotes(notes: CriticNote[]): CriticNote[] {
-  return [...notes].sort(
+  const best = new Map<string, CriticNote>();
+  for (const n of notes) {
+    const key = noteWords(n.note);
+    const have = best.get(key);
+    if (
+      !have ||
+      (n.noted_on && !have.noted_on) ||
+      (!!n.noted_on === !!have.noted_on && n.author.length > have.author.length)
+    )
+      best.set(key, n);
+  }
+  return [...best.values()].sort(
     (a, b) =>
       ORDER[a.kind] - ORDER[b.kind] ||
       (b.noted_on ?? '').localeCompare(a.noted_on ?? '') ||

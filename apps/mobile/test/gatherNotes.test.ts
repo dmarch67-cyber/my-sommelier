@@ -191,7 +191,7 @@ test('Wine page lists critics first, newest first, winery last', () => {
     kind,
     score: null,
     noted_on,
-    note: 'x',
+    note: `note by ${id}`,
     source_url: 'https://a.com',
     source_site: 'a.com',
   });
@@ -207,4 +207,63 @@ test('Wine page lists critics first, newest first, winery last', () => {
   );
   assert.equal(noteCaption(n('w', 'winery', '2025-03')), "Winery's own note · 2025 · a.com");
   assert.equal(noteCaption(n('c', 'critic', null)), 'a.com');
+});
+
+test('the same note quoted by two shops is kept once, the dated and fuller one', async () => {
+  const { dedupe, noteKey } = await import('../../../supabase/functions/gather-notes/prompt.ts');
+  const base = {
+    vintage_id: V1,
+    kind: 'critic' as const,
+    score: '97',
+    source_url: 'https://a.com',
+    source_site: 'a.com',
+  };
+  const out = dedupe([
+    { ...base, author: 'Wine Advocate', noted_on: null, note: NOTE },
+    {
+      ...base,
+      author: 'William Kelley (Wine Advocate)',
+      noted_on: '2022-04',
+      note: NOTE + ' Extra.',
+    },
+    {
+      ...base,
+      author: 'Jeb Dunnuck',
+      noted_on: null,
+      note: 'Something else entirely, quite different from the first note here.',
+    },
+  ]);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].author, 'William Kelley (Wine Advocate)');
+  const again = dedupe(
+    [{ ...base, author: 'X', noted_on: null, note: NOTE }],
+    new Set([noteKey(V1, NOTE)]),
+  );
+  assert.equal(again.length, 0);
+  const shown = sortNotes([
+    {
+      id: 'a',
+      author: 'Wine Advocate',
+      kind: 'critic',
+      score: null,
+      noted_on: null,
+      note: NOTE,
+      source_url: 'https://a.com',
+      source_site: 'a.com',
+    },
+    {
+      id: 'b',
+      author: 'William Kelley (Wine Advocate)',
+      kind: 'critic',
+      score: null,
+      noted_on: '2022',
+      note: NOTE,
+      source_url: 'https://b.com',
+      source_site: 'b.com',
+    },
+  ]);
+  assert.deepEqual(
+    shown.map((s) => s.id),
+    ['b'],
+  );
 });

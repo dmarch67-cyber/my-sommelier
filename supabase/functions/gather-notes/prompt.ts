@@ -265,7 +265,7 @@ export type NoteOut = {
 export function plain(s: string): string {
   return s
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
@@ -316,7 +316,8 @@ export function cleanNotes(
   w: WineIn,
   pages: ReadPage[],
   year: number,
-): { notes: NoteOut[]; rejected: number } {
+): { notes: NoteOut[]; rejected: number; samples: string[] } {
+  const samples: string[] = [];
   const ids = new Set(w.vintages.map((v) => v.id));
   const list = (raw as { notes?: unknown })?.notes;
   const notes: NoteOut[] = [];
@@ -337,10 +338,13 @@ export function cleanNotes(
       /vivino|cellartracker|vinous\.com|wineberserkers/i.test(author)
     ) {
       rejected++;
+      if (samples.length < 4)
+        samples.push(`bad: ${author} p${String(r?.page)} ${note.slice(0, 60)}`);
       continue;
     }
     if (!page.pdf && !(page.text && onPage(note, page.text))) {
       rejected++;
+      if (samples.length < 4) samples.push(`not on page: ${author} ${note.slice(0, 60)}`);
       continue;
     }
     const key = `${r.vintage_id}|${author.toLowerCase()}|${plain(note).slice(0, 120)}`;
@@ -359,7 +363,33 @@ export function cleanNotes(
       source_site: page.site,
     });
   }
-  return { notes, rejected };
+  return { notes, rejected, samples };
+}
+
+/** The words that identify a note, whoever a page says wrote it. */
+export function noteKey(vintageId: string, note: string): string {
+  return `${vintageId}|${plain(note).split(' ').slice(0, 20).join(' ')}`;
+}
+
+/**
+ * Shops often quote the same critic's note, and name the critic differently
+ * ("Wine Advocate" or "William Kelley (Wine Advocate)"). Keeps one of each:
+ * the copy with a date, then the one naming the critic most fully. Notes
+ * already saved (by key) are left out.
+ */
+export function dedupe(notes: NoteOut[], saved: Set<string> = new Set()): NoteOut[] {
+  const best = new Map<string, NoteOut>();
+  for (const n of notes) {
+    const key = noteKey(n.vintage_id, n.note);
+    if (saved.has(key)) continue;
+    const have = best.get(key);
+    const better =
+      !have ||
+      (n.noted_on && !have.noted_on) ||
+      (!!n.noted_on === !!have.noted_on && n.author.length > have.author.length);
+    if (better) best.set(key, n);
+  }
+  return [...best.values()];
 }
 
 /** True if robots.txt lets any robot read this path (simple reading of "User-agent: *"). */
