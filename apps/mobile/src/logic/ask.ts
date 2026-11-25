@@ -219,3 +219,8 @@ export function buildAskRows(input: {
   }
   return [...rows.values()];
 }
+
+/** The wines under an answer: the highlighted ones first, then the rest of the counted list. */
+export function answerWineIds(answer: { wine_ids: string[]; list_ids?: string[] }): string[] {
+  return [...new Set([...answer.wine_ids, ...(answer.list_ids ?? [])])];
+}

@@ -20,6 +20,7 @@ import {
   runTool,
   SYSTEM,
   type AskRow,
+  type FindInput,
   type FoodLine,
 } from './cellar.ts';
 
@@ -99,6 +100,7 @@ Deno.serve(async (req) => {
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     { role: 'user', content: contextText({ question, cellars, lookingAt, year, palate }) },
   ];
+  const lookups: FindInput[] = [];
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, rounds: 0 };
 
   try {
@@ -140,7 +142,7 @@ Deno.serve(async (req) => {
           results.push({
             type: 'tool_result',
             tool_use_id: block.id,
-            content: JSON.stringify(runTool(rows, block.name, block.input, food)),
+            content: JSON.stringify(runTool(rows, block.name, block.input, food, lookups)),
           });
         }
         messages.push({ role: 'user', content: results });
@@ -154,7 +156,7 @@ Deno.serve(async (req) => {
       } catch {
         parsed = null;
       }
-      const answer = cleanAnswer(parsed, rows);
+      const answer = cleanAnswer(parsed, rows, lookups);
       if (!answer) return reply(502, { error: 'The sommelier gave an unclear answer. Try again.' });
       console.log('ask-cellar usage', JSON.stringify(usage));
       return reply(200, { ...answer, usage });

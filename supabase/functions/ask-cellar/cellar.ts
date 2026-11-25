@@ -11,8 +11,10 @@ export const MODEL = 'claude-opus-5-5';
 export const MAX_ROWS = 5000;
 /** Most lookups Claude may make for one question. */
 export const MAX_TOOL_ROUNDS = 6;
-/** Most wines shown as cards under an answer. */
+/** Most wines highlighted first under an answer. */
 export const MAX_CARDS = 8;
+/** Most wines listed in full under an answer that gives a count. */
+export const MAX_LIST = 400;
 
 export type ReadyState = 'young' | 'ready' | 'peak' | 'soon' | 'past' | 'unknown';
 export const READY_STATES: ReadyState[] = ['young', 'ready', 'peak', 'soon', 'past', 'unknown'];
@@ -171,6 +173,9 @@ export type FindInput = {
   vintage_to?: number;
   min_score?: number;
   ready?: ReadyState[];
+  window_ends_from?: number;
+  window_ends_to?: number;
+  /** Older name for window_ends_to. */
   drink_by_year?: number;
   min_price?: number;
   max_price?: number;
@@ -223,9 +228,15 @@ export const FIND_TOOL = {
         description:
           'young = not ready yet; ready = in its window; peak = at its best now; soon = drink soon, window closing; past = past its window; unknown = no window known.',
       },
-      drink_by_year: {
+      window_ends_from: {
         type: 'integer',
-        description: 'Only wines whose drinking window ends in or before this year.',
+        description:
+          'Only wines whose drinking window ends in or after this year. For "ends in 2027" set window_ends_from and window_ends_to both to 2027.',
+      },
+      window_ends_to: {
+        type: 'integer',
+        description:
+          'Only wines whose drinking window ends in or before this year. For "drink by 2027" set only this.',
       },
       min_price: { type: 'number', description: 'Price paid per bottle, at least.' },
       max_price: { type: 'number', description: 'Price paid per bottle, at most.' },
@@ -314,7 +325,10 @@ function matches(r: AskRow, q: FindInput): boolean {
   if (q.vintage_to != null && (r.vintage == null || r.vintage > q.vintage_to)) return false;
   if (q.min_score != null && (r.score == null || r.score < q.min_score)) return false;
   if (q.ready?.length && !q.ready.includes(r.ready)) return false;
-  if (q.drink_by_year != null && (r.drink_to == null || r.drink_to > q.drink_by_year)) return false;
+  const endsTo = q.window_ends_to ?? q.drink_by_year;
+  if (endsTo != null && (r.drink_to == null || r.drink_to > endsTo)) return false;
+  if (q.window_ends_from != null && (r.drink_to == null || r.drink_to < q.window_ends_from))
+    return false;
   if (q.min_price != null && (r.price == null || r.price < q.min_price)) return false;
   if (q.max_price != null && (r.price == null || r.price > q.max_price)) return false;
   if (q.large_format && r.magnums + r.other_sizes === 0) return false;
@@ -450,6 +464,21 @@ export function findWines(rows: AskRow[], input: FindInput): FindResult {
   return result;
 }
 
+/** Every matching wine id, once each, in the lookup's order: the full list under a count. */
+export function allMatchIds(rows: AskRow[], input: FindInput): string[] {
+  const q = input ?? {};
+  const sort = SORTS.includes(q.sort as Sort) ? (q.sort as Sort) : 'name';
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows.filter((x) => matches(x, q)).sort(sorter(sort))) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    ids.push(r.id);
+    if (ids.length >= MAX_LIST) break;
+  }
+  return ids;
+}
+
 function money(amount: number, currency: string): string {
   return `${Math.round(amount * 100) / 100} ${currency}`;
 }
@@ -519,8 +548,14 @@ export function runTool(
   name: string,
   input: unknown,
   food: FoodLine[] = [],
+  /** Every find_wines input so far; this call's is added, and its number returned. */
+  lookups: FindInput[] = [],
 ): unknown {
-  if (name === 'find_wines') return findWines(rows, (input ?? {}) as FindInput);
+  if (name === 'find_wines') {
+    const q = (input ?? {}) as FindInput;
+    lookups.push(q);
+    return { lookup_number: lookups.length, ...findWines(rows, q) };
+  }
   if (name === 'wine_details')
     return wineDetails(rows, (input as { ids?: unknown } | null)?.ids, food);
   return { error: `No tool called ${name}.` };
@@ -528,15 +563,20 @@ export function runTool(
 
 // The prompt and the answer ----------------------------------------------------------
 
-export type Answer = { answer: string; wine_ids: string[] };
+/**
+ * wine_ids: the wines to show first. list_ids: every wine the answer counts
+ * (the full matches of one lookup), so a count and the list always agree.
+ */
+export type Answer = { answer: string; wine_ids: string[]; list_ids?: string[] };
 
 export const ANSWER_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['answer', 'wine_ids'],
+  required: ['answer', 'wine_ids', 'list_lookup'],
   properties: {
     answer: { type: 'string' },
     wine_ids: { type: 'array', items: { type: 'string' } },
+    list_lookup: { type: ['integer', 'null'] },
   },
 } as const;
 
@@ -555,7 +595,9 @@ How to answer:
 - "answer": plain, warm, conversational English for a non-expert. Lead with the direct answer, including exact numbers when asked. One to four short sentences; a short list of names is fine when they asked for several. No markdown headings, no tables, no ids, no tool names.
 - Say which cellar(s) the answer covers when it matters.
 - If nothing matches, say so plainly and suggest the closest thing they do have.
-- "wine_ids": the ids of up to ${MAX_CARDS} wines you name or recommend, best first, so the app can show them as cards. Use ids exactly as find_wines returned them. Empty when no particular wines are relevant (for example a pure count across hundreds of wines).`;
+- "wine_ids": the ids of up to ${MAX_CARDS} wines you name or recommend, best first, so the app can show them first. Use ids exactly as find_wines returned them.
+- "list_lookup": whenever the answer gives a number of wines or talks about a set of wines ("48 wines end in 2027", "your Bordeaux in Paris"), the lookup_number of the find_wines call whose matches are exactly that set. The app then lists every one of them under your answer, so the number you give must equal that lookup's matched.wines. Null when the answer is not about a set of wines.
+- Answer exactly what was asked. If they ask which wines end in 2027, count only windows ending in 2027 (window_ends_from and window_ends_to both 2027), not earlier ones.`;
 
 export function contextText(opts: {
   question: string;
@@ -572,8 +614,15 @@ ${opts.palate ? `Their palate: ${opts.palate}\n` : ''}
 Question: ${opts.question}`;
 }
 
-/** Keeps only card ids that exist, each once, at most MAX_CARDS. */
-export function cleanAnswer(raw: unknown, rows: AskRow[]): Answer | null {
+/**
+ * Keeps only card ids that exist, each once, at most MAX_CARDS. When the
+ * answer names a lookup, lists every wine that lookup matched.
+ */
+export function cleanAnswer(
+  raw: unknown,
+  rows: AskRow[],
+  lookups: FindInput[] = [],
+): Answer | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const answer = typeof o.answer === 'string' ? o.answer.trim().slice(0, 2000) : '';
@@ -587,5 +636,8 @@ export function cleanAnswer(raw: unknown, rows: AskRow[]): Answer | null {
     wine_ids.push(id);
     if (wine_ids.length >= MAX_CARDS) break;
   }
-  return { answer, wine_ids };
+  const n = typeof o.list_lookup === 'number' ? Math.round(o.list_lookup) : 0;
+  const lookup = n >= 1 && n <= lookups.length ? lookups[n - 1] : null;
+  if (!lookup) return { answer, wine_ids };
+  return { answer, wine_ids, list_ids: allMatchIds(rows, lookup) };
 }
