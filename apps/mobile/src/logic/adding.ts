@@ -243,3 +243,26 @@ export function parseScore(raw: string): {
     return { raw: s, low: Number(single[1]), high: null, plus: !!single[2] };
   return { raw: s, low: null, high: null, plus: false };
 }
+
+// Move bottles -------------------------------------------------------------------
+
+/** What can move out of one cellar: one entry per bottle size with bottles in it. */
+export function moveSizes(
+  choices: DrinkChoice[],
+  fromCellarId: string,
+): { sizeMl: number; sizeLabel: string; bottles: number }[] {
+  return choices
+    .filter((c) => c.cellarId === fromCellarId && c.bottles > 0)
+    .map((c) => ({ sizeMl: c.sizeMl, sizeLabel: c.sizeLabel, bottles: c.bottles }));
+}
+
+/** "Moved 3 bottles to Paris." / "Moved 1 magnum to Oregon." */
+export function moveSummary(count: number, sizeMl: number, sizeLabel: string, to: string): string {
+  const what =
+    sizeMl === 750
+      ? count === 1
+        ? 'bottle'
+        : 'bottles'
+      : `${sizeLabel.toLowerCase()}${count === 1 ? '' : 's'}`;
+  return `Moved ${count} ${what} to ${to}.`;
+}

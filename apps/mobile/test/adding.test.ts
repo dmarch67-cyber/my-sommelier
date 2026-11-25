@@ -8,6 +8,8 @@ import {
   drinkChoices,
   findWines,
   foldName,
+  moveSizes,
+  moveSummary,
   parseScore,
   parseSpokenAdd,
   spokenCellar,
@@ -215,4 +217,29 @@ test('reads a real .xlsx file, including formulas and a later first sheet', asyn
   assert.equal(rows[4][1], 'Skipped a row');
   const p = parseDelivery(rows);
   assert.equal(p.lines.length, 2);
+});
+
+test('moveSizes lists the sizes with bottles in one cellar', () => {
+  const rows = [
+    row({ cellar_id: 'la', quantity: 4 }),
+    row({ cellar_id: 'la', quantity: 2 }),
+    row({ cellar_id: 'la', quantity: 1, bottle_size_ml: 1500, bottle_size_label: 'Magnum' }),
+    row({ cellar_id: 'paris', cellar_name: 'Paris', quantity: 3 }),
+    row({ cellar_id: 'la', quantity: 0, bottle_size_ml: 375, bottle_size_label: 'Half bottle' }),
+  ];
+  const sizes = moveSizes(drinkChoices(rows, ['la', 'paris']), 'la');
+  assert.deepEqual(
+    sizes.map((s) => [s.sizeMl, s.bottles]),
+    [
+      [750, 6],
+      [1500, 1],
+    ],
+  );
+});
+
+test('moveSummary reads naturally', () => {
+  assert.equal(moveSummary(3, 750, 'Standard', 'Paris'), 'Moved 3 bottles to Paris.');
+  assert.equal(moveSummary(1, 750, 'Standard', 'Paris'), 'Moved 1 bottle to Paris.');
+  assert.equal(moveSummary(1, 1500, 'Magnum', 'Oregon'), 'Moved 1 magnum to Oregon.');
+  assert.equal(moveSummary(2, 1500, 'Magnum', 'Oregon'), 'Moved 2 magnums to Oregon.');
 });

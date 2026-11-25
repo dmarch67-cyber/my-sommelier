@@ -13,6 +13,8 @@ function fail(error: { message: string } | null): void {
 
 function friendly(message: string): string {
   if (/holdings_quantity_check/.test(message)) return 'There are no bottles left to take.';
+  if (/could not find the function public\.move_bottles|move_bottles.*schema cache/i.test(message))
+    return 'Moving bottles isn’t switched on yet. Try again in a few minutes.';
   if (/holdings_quantity_on_order_check/.test(message))
     return 'That would leave fewer than 0 on order.';
   if (/JWT|not authenticated|permission denied/i.test(message))
@@ -154,4 +156,26 @@ export async function savePalate(
     .from('palate_profiles')
     .upsert({ account_id: accountId, ...settings }, { onConflict: 'account_id' });
   fail(error);
+}
+
+/**
+ * Moves bottles of one vintage and size to another cellar. All of them move, or
+ * none. The bottles keep what was paid for them. Returns the event ids for Undo.
+ */
+export async function moveBottles(input: {
+  vintageId: string;
+  fromCellarId: string;
+  toCellarId: string;
+  sizeMl: number;
+  count: number;
+}): Promise<string[]> {
+  const { data, error } = await supabase.rpc('move_bottles', {
+    p_vintage_id: input.vintageId,
+    p_from_cellar_id: input.fromCellarId,
+    p_to_cellar_id: input.toCellarId,
+    p_bottle_size_ml: input.sizeMl,
+    p_quantity: input.count,
+  });
+  fail(error);
+  return (data as { event_ids: string[] }).event_ids;
 }
