@@ -281,7 +281,8 @@ Each picture comes from a web page a search found for this wine; you get the pag
 - matches: true when it shows a bottle or front label of THIS wine. What you can read on the label must agree with the wine (the producer and/or the specific cuvée, vineyard or bottling name; at least one must be readable) and the page title must point to this exact wine. A label that shows only the cuvée name or the producer's art is fine when the page is clearly about this wine and nothing readable contradicts it. A different cuvée from the same producer is NOT a match.
 - year: the vintage you can actually read on the label in the picture (not from the page title), or null if none is readable.
 - view: "label" when the front label fills most of the picture (a close-up), "bottle" when it is a whole single bottle with the front label visible, "other" for anything else (logos, vineyard or people photos, cases or several bottles, back labels, crops of artwork with no words).
-- clear: true when the label is sharp and big enough to read.`;
+- clear: true when the label is sharp and big enough to read.
+- name_read: true only when you can actually read the producer's or the specific wine's name on the label in this picture (not from the page title, and not guessed from the art or the bottle shape).`;
 
 export const LOOK_SCHEMA = {
   type: 'object',
@@ -297,8 +298,9 @@ export const LOOK_SCHEMA = {
           year: { type: ['integer', 'null'] },
           view: { type: 'string', enum: ['label', 'bottle', 'other'] },
           clear: { type: 'boolean' },
+          name_read: { type: 'boolean' },
         },
-        required: ['number', 'shows', 'matches', 'year', 'view', 'clear'],
+        required: ['number', 'shows', 'matches', 'year', 'view', 'clear', 'name_read'],
         additionalProperties: false,
       },
     },
@@ -314,6 +316,7 @@ export type Seen = {
   year: number | null;
   view: 'label' | 'bottle' | 'other';
   clear: boolean;
+  name_read: boolean;
 };
 export type Look = { pictures: Seen[] };
 
@@ -324,6 +327,7 @@ function usable(look: Look | null, count: number): Seen[] {
       (p) =>
         p.matches &&
         p.clear &&
+        p.name_read &&
         p.view !== 'other' &&
         Number.isInteger(p.number) &&
         p.number >= 1 &&
@@ -334,9 +338,9 @@ function usable(look: Look | null, count: number): Seen[] {
 
 /**
  * Which picture (by number) goes on each vintage, and which one stands in for
- * the wine as a whole. A vintage only gets a picture whose label shows its own
- * year. The stand-in is the best picture of any year, newest year first among
- * equally good ones.
+ * the wine as a whole. Every picture used must have the wine's name readable
+ * on its label. A vintage only gets a picture whose label shows its own year
+ * (close-ups first). The stand-in must be a label close-up, newest year first.
  */
 export function assign(
   look: Look | null,
@@ -350,11 +354,10 @@ export function assign(
     const p = good.find((g) => g.year === v.year);
     if (p) byVintage.set(v.id, p.number);
   }
-  const rank = (p: Seen) => (p.view === 'label' ? 0 : 1);
   const wine =
-    [...good].sort(
-      (a, b) => rank(a) - rank(b) || (b.year ?? 0) - (a.year ?? 0) || a.number - b.number,
-    )[0]?.number ?? null;
+    good
+      .filter((p) => p.view === 'label')
+      .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.number - b.number)[0]?.number ?? null;
   return { byVintage, wine };
 }
 
