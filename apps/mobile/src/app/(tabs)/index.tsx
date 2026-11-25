@@ -50,7 +50,14 @@ const READY_COLOR: Record<ReadyState, string> = {
 type Asked =
   | { state: 'idle' }
   | { state: 'asking'; key: string; ask: string }
-  | { state: 'done'; key: string; ask: string; suggestion: Suggestion }
+  | {
+      state: 'done';
+      key: string;
+      ask: string;
+      suggestion: Suggestion;
+      /** "More suggestions": fetching, nothing new left, or failed. */
+      more?: 'loading' | 'none' | 'error';
+    }
   | { state: 'error'; key: string; message: string };
 
 export default function TonightScreen() {
@@ -95,6 +102,25 @@ export default function TonightScreen() {
   // The sommelier's answer belongs to one question in one cellar with one set of chips.
   const askKey = `${text.trim()}|${colour}|${body}|${filter}`;
   const current = asked.state !== 'idle' && asked.key === askKey ? asked : null;
+
+  /** The bottles the sommelier chooses from, best first, leaving out ones already suggested. */
+  const candidatesFor = useCallback(
+    (q: string, skip: Set<string> = new Set()) =>
+      recommend(items, {
+        year,
+        colour,
+        body,
+        ask: parseAsk(q),
+        everywhere,
+        maturity: data.maturity,
+        notes: data.notes,
+        palate: data.palate,
+      })
+        .picks.filter((p) => !p.ready.excluded && !skip.has(p.item.vintageId))
+        .slice(0, SOMMELIER_CANDIDATES)
+        .map(toCandidate),
+    [items, year, colour, body, everywhere, data.maturity, data.notes, data.palate],
+  );
 
   const askNow = useCallback(
     async (question: string) => {
@@ -146,6 +172,34 @@ export default function TonightScreen() {
       sommelierOff,
     ],
   );
+
+  // "More suggestions": the next few bottles for the same ask, never repeating.
+  const askMore = useCallback(async () => {
+    if (asked.state !== 'done' || asked.more === 'loading') return;
+    const { key, ask: q } = asked;
+    const already = new Set(asked.suggestion.picks.map((p) => p.id));
+    const candidates = candidatesFor(q, already);
+    if (candidates.length === 0) {
+      setAsked((a) => (a.state === 'done' && a.key === key ? { ...a, more: 'none' } : a));
+      return;
+    }
+    setAsked((a) => (a.state === 'done' && a.key === key ? { ...a, more: 'loading' } : a));
+    try {
+      const next = await askSommelier(q, candidates, palateText(data.palate));
+      const fresh = next.picks.filter((p) => !already.has(p.id));
+      setAsked((a) =>
+        a.state === 'done' && a.key === key
+          ? {
+              ...a,
+              suggestion: { ...a.suggestion, picks: [...a.suggestion.picks, ...fresh] },
+              more: fresh.length ? undefined : 'none',
+            }
+          : a,
+      );
+    } catch {
+      setAsked((a) => (a.state === 'done' && a.key === key ? { ...a, more: 'error' } : a));
+    }
+  }, [asked, candidatesFor, data.palate]);
 
   // A dish tapped on a Wine page arrives as ?ask=…: type it in and ask.
   const { ask: askParam } = useLocalSearchParams<{ ask?: string }>();
@@ -345,6 +399,7 @@ export default function TonightScreen() {
             readyById={readyById}
             year={year}
             onRetry={() => askNow(text)}
+            onMore={askMore}
           />
         )}
 
@@ -519,12 +574,14 @@ function SommelierCard({
   readyById,
   year,
   onRetry,
+  onMore,
 }: {
   asked: Exclude<Asked, { state: 'idle' }>;
   picks: { item: CellarItem; why: string }[];
   readyById: Map<string, Pick>;
   year: number;
   onRetry: () => void;
+  onMore: () => void;
 }) {
   return (
     <View style={styles.sommelier}>
@@ -596,6 +653,21 @@ function SommelierCard({
           {picks.length > 0 && asked.suggestion.note ? (
             <T variant="caption">{asked.suggestion.note}</T>
           ) : null}
+          {picks.length > 0 &&
+            (asked.more === 'loading' ? (
+              <View style={styles.thinking}>
+                <ActivityIndicator color={colors.accent} />
+                <T variant="caption">Finding more bottles…</T>
+              </View>
+            ) : asked.more === 'none' ? (
+              <T variant="caption">That’s every bottle that fits well.</T>
+            ) : (
+              <Pressable onPress={onMore} accessibilityRole="button" hitSlop={6}>
+                <T variant="bodyStrong" style={{ color: colors.accent }}>
+                  {asked.more === 'error' ? 'Couldn’t get more. Try again' : 'More suggestions'}
+                </T>
+              </Pressable>
+            ))}
         </View>
       )}
     </View>
