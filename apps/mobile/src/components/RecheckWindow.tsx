@@ -58,7 +58,7 @@ export function RecheckWindow({ vintageId, onSaved }: { vintageId: string; onSav
         {why ? <T variant="body">{why}</T> : null}
         {sources.length > 0 && (
           <View style={{ gap: 2 }}>
-            {sources.slice(0, 3).map((src) => (
+            {[...new Map(sources.map((x) => [x.url, x])).values()].slice(0, 3).map((src) => (
               <Pressable
                 key={src.url}
                 onPress={() => Linking.openURL(src.url)}
