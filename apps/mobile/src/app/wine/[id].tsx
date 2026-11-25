@@ -8,13 +8,19 @@ import { Icon } from '../../components/Icon';
 import { LabelPicture } from '../../components/LabelPicture';
 import { RipenessBar } from '../../components/RipenessBar';
 import { FoodMatches } from '../../components/FoodMatches';
+import { MoveBottles, type MoveRequest } from '../../components/MoveBottles';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { formatDay } from '../../lib/format';
 import { useCellarData } from '../../data/CellarData';
 import { useLastCellar } from '../../data/lastCellar';
-import { drinkOne, markDelivered, undoEvents } from '../../data/writes';
-import { defaultDrinkChoice, drinkChoices, type DrinkChoice } from '../../logic/adding';
+import { drinkOne, markDelivered, moveBottles, undoEvents } from '../../data/writes';
+import {
+  defaultDrinkChoice,
+  drinkChoices,
+  moveSummary,
+  type DrinkChoice,
+} from '../../logic/adding';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
 import {
   countsLine,
@@ -51,6 +57,8 @@ export default function WinePage() {
   const [lastCellar] = useLastCellar(data.cellars.map((c) => c.id));
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The cellar whose Move card is open. */
+  const [movingFrom, setMovingFrom] = useState<string | null>(null);
   const year = new Date().getFullYear();
 
   const view = useMemo(() => {
@@ -200,6 +208,35 @@ export default function WinePage() {
     }
   };
 
+  /** Moves the bottles at once; the toast offers Undo. */
+  const move = async (req: MoveRequest) => {
+    if (!view) return;
+    setBusy(true);
+    try {
+      const ids = await moveBottles({
+        vintageId: view.wine.vintage_id,
+        fromCellarId: req.fromCellarId,
+        toCellarId: req.toCellarId,
+        sizeMl: req.sizeMl,
+        count: req.count,
+      });
+      setMovingFrom(null);
+      await data.reload();
+      toast(moveSummary(req.count, req.sizeMl, req.sizeLabel, req.toCellarName), {
+        label: 'Undo',
+        onPress: async () => {
+          await undoEvents(ids);
+          await data.reload();
+          toast('Moved back.');
+        },
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (data.status !== 'ready') {
     return (
       <SafeAreaView style={styles.safe}>
@@ -340,6 +377,23 @@ export default function WinePage() {
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: space.xs }}>
                   <T variant="body">{countsLine(c)}</T>
+                  {c.bottles > 0 && data.cellars.length > 1 && (
+                    <Pressable
+                      onPress={() => setMovingFrom(movingFrom === c.cellarId ? null : c.cellarId)}
+                      disabled={busy}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Move bottles from ${c.name}`}
+                      hitSlop={6}
+                      style={styles.smallButton}
+                    >
+                      <T
+                        variant="caption"
+                        style={{ color: colors.accent, fontFamily: fonts.semibold }}
+                      >
+                        Move
+                      </T>
+                    </Pressable>
+                  )}
                   {c.onOrderRows.length > 0 && (
                     <Pressable
                       onPress={() => arrived(c.onOrderRows, c.name)}
@@ -360,6 +414,18 @@ export default function WinePage() {
               </View>
             ))}
           </Card>
+          {movingFrom && view.cellars.some((c) => c.cellarId === movingFrom && c.bottles > 0) && (
+            <MoveBottles
+              key={movingFrom}
+              fromCellarId={movingFrom}
+              fromCellarName={view.cellars.find((c) => c.cellarId === movingFrom)!.name}
+              choices={view.choices}
+              cellars={data.cellars}
+              busy={busy}
+              onMove={move}
+              onCancel={() => setMovingFrom(null)}
+            />
+          )}
         </Section>
 
         <Section title="Scores">
