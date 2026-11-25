@@ -26,7 +26,7 @@ import {
   type CellarItem,
   type SortKey,
 } from '../../logic/cellar';
-import { buildAskRows, looksLikeQuestion } from '../../logic/ask';
+import { answerWineIds, buildAskRows, looksLikeQuestion } from '../../logic/ask';
 import { palateText } from '../../logic/palate';
 
 type AskState = {
@@ -96,7 +96,7 @@ export default function CellarScreen() {
   const answerItems = useMemo(
     () =>
       ask?.status === 'done'
-        ? (ask.answer?.wine_ids ?? [])
+        ? (ask.answer ? answerWineIds(ask.answer) : [])
             .map((id) => everywhere.get(id))
             .filter((i): i is CellarItem => !!i)
         : [],
@@ -244,6 +244,11 @@ export default function CellarScreen() {
       />
 
       {ask ? <AnswerCard ask={ask} onRetry={() => runAsk(ask.question)} /> : null}
+      {ask?.status === 'done' && ask.answer?.list_ids && answerItems.length > 0 ? (
+        <T variant="caption" style={styles.listCaption}>
+          {answerItems.length === 1 ? 'The wine' : `All ${answerItems.length} wines`}
+        </T>
+      ) : null}
 
       {ask ? null : (
         <View style={styles.sortRow}>
@@ -485,6 +490,7 @@ const styles = StyleSheet.create({
   scoreText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.accent },
   separator: { height: 1, backgroundColor: colors.border, marginLeft: space.lg + 48 + space.md },
   empty: { padding: space.xxl, alignItems: 'center' },
+  listCaption: { marginTop: -space.sm, marginBottom: space.xs },
   askLink: { fontFamily: fonts.medium, color: colors.accent },
   answer: {
     backgroundColor: colors.accentSoft,

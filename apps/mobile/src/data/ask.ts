@@ -56,5 +56,11 @@ export async function askCellar(input: {
   if (!data || typeof data.answer !== 'string') {
     throw new AskError('The sommelier gave an unclear answer. Try again.');
   }
-  return { answer: data.answer, wine_ids: Array.isArray(data.wine_ids) ? data.wine_ids : [] };
+  const ids = (v: unknown) =>
+    Array.isArray(v) ? v.filter((i): i is string => typeof i === 'string') : [];
+  return {
+    answer: data.answer,
+    wine_ids: ids(data.wine_ids),
+    ...(Array.isArray(data.list_ids) ? { list_ids: ids(data.list_ids) } : {}),
+  };
 }

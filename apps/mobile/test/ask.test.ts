@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  allMatchIds,
   cleanAnswer,
   cleanRows,
   findWines,
   runTool,
   type AskRow,
 } from '../../../supabase/functions/ask-cellar/cellar.ts';
-import { buildAskRows, looksLikeQuestion, maturityProgress } from '../src/logic/ask.ts';
+import {
+  answerWineIds,
+  buildAskRows,
+  looksLikeQuestion,
+  maturityProgress,
+} from '../src/logic/ask.ts';
 import type { InventoryRow, Maturity, TastingNote } from '../src/logic/cellar.ts';
 
 const YEAR = 2026;
@@ -240,4 +246,58 @@ test('rows from the app are cleaned, answers keep only real wine ids', () => {
     wine_ids: ['v1'],
   });
   assert.equal(cleanAnswer({ answer: '' }, rows), null);
+});
+
+test('"ends in 2027" counts only windows ending in 2027', () => {
+  const rows = rowsFrom([
+    line({ drink_to: 2027 }),
+    line({ drink_to: 2027, cellar_id: 'la', cellar_name: 'LA' }),
+    line({ drink_to: 2026 }),
+    line({ drink_to: 2025 }),
+    line({ drink_to: 2030 }),
+  ]);
+  assert.equal(findWines(rows, { window_ends_from: 2027, window_ends_to: 2027 }).matched.wines, 2);
+  assert.equal(findWines(rows, { window_ends_to: 2027 }).matched.wines, 4);
+  assert.equal(findWines(rows, { drink_by_year: 2027 }).matched.wines, 4);
+});
+
+test('an answer that counts wines lists every one of them', () => {
+  const inv: InventoryRow[] = [];
+  for (let i = 0; i < 48; i++) inv.push(line({ drink_to: 2027, wine_name: `Ends ${i}` }));
+  inv.push(line({ drink_to: 2026 }));
+  const rows = rowsFrom(inv);
+  const lookups: Parameters<typeof cleanAnswer>[2] = [];
+  const res = runTool(
+    rows,
+    'find_wines',
+    { window_ends_from: 2027, window_ends_to: 2027, limit: 7 },
+    [],
+    lookups,
+  ) as {
+    lookup_number: number;
+    matched: { wines: number };
+    wines: { id: string }[];
+  };
+  assert.equal(res.lookup_number, 1);
+  assert.equal(res.matched.wines, 48);
+  assert.equal(res.wines.length, 7);
+  const a = cleanAnswer(
+    { answer: '48 wines end in 2027.', wine_ids: [res.wines[3].id], list_lookup: 1 },
+    rows,
+    lookups,
+  )!;
+  assert.equal(a.list_ids!.length, 48);
+  const shown = answerWineIds(a);
+  assert.equal(shown.length, 48);
+  assert.equal(shown[0], res.wines[3].id);
+  // No list when the answer names no lookup, or a lookup that never happened.
+  assert.equal(
+    cleanAnswer({ answer: 'Hi', wine_ids: [], list_lookup: null }, rows, lookups)!.list_ids,
+    undefined,
+  );
+  assert.equal(
+    cleanAnswer({ answer: 'Hi', wine_ids: [], list_lookup: 9 }, rows, lookups)!.list_ids,
+    undefined,
+  );
+  assert.equal(allMatchIds(rows, { window_ends_to: 2026 }).length, 1);
 });
