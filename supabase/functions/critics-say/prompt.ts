@@ -83,7 +83,7 @@ export function userText(w: WineIn): string {
     lines.push(`  review: ${v.summary ?? '(none)'}`);
     for (const n of (v.notes ?? []).slice(0, 8)) {
       const head = [n.author, n.score, n.noted_on].filter(Boolean).join(', ');
-      const body = n.note.length > 500 ? n.note.slice(0, 500) + '…' : n.note;
+      const body = n.note.length > 500 ? n.note.slice(0, 500) + '\u2026' : n.note;
       lines.push(`  published note (${n.kind}; ${head}): ${body}`);
     }
   }
@@ -100,7 +100,7 @@ export function cleanAnswer(raw: unknown, w: WineIn): { vintage_id: string; text
     if (!r || typeof r.vintage_id !== 'string' || !asked.has(r.vintage_id)) continue;
     if (typeof r.text !== 'string') continue;
     const text = r.text
-      .replace(/\s*—\s*/g, ', ')
+      .replace(/\s*\u2014\s*/g, ', ')
       .replace(/\s+/g, ' ')
       .trim();
     // Drinking dates belong to the window above it, so a summary naming one is redone.
@@ -136,7 +136,7 @@ const COMMON = new Set([
 function words(s: string): string[] {
   return s
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((x) => x.length >= 3 && !COMMON.has(x));

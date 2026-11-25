@@ -51,6 +51,9 @@ const PAGE_CHARS = 14_000; // about 3,500 tokens of each page
 const MAX_PDFS = 3;
 const MAX_PDF_BYTES = 4_000_000;
 const PAGES_PER_READ = 3;
+// Stop reading at this point so the wine is saved before the function's time
+// limit (150 s) cuts it off; groups not read by then are skipped.
+const READ_DEADLINE_MS = 125_000;
 
 type Usage = {
   search_input: number;
@@ -74,6 +77,7 @@ function reply(status: number, body: unknown): Response {
 }
 
 Deno.serve(async (req) => {
+  const started = Date.now();
   if (req.method !== 'POST') return reply(405, { error: 'Use POST.' });
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -167,7 +171,7 @@ Deno.serve(async (req) => {
     }
 
     // 3. Take out the notes.
-    const raw = await takeNotes(client, wine, read, usage);
+    const raw = await takeNotes(client, wine, read, usage, started + READ_DEADLINE_MS);
     const year = new Date().getFullYear();
     const cleaned = cleanNotes(raw, wine, read, year);
     usage.rejected = cleaned.rejected;
@@ -363,6 +367,7 @@ async function takeNotes(
   wine: WineIn,
   pages: (ReadPage & { bytes?: Uint8Array })[],
   usage: Usage,
+  deadline: number,
 ): Promise<{ notes: unknown[] }> {
   const groups: number[][] = [];
   for (let i = 0; i < pages.length; i += PAGES_PER_READ) {
@@ -370,12 +375,12 @@ async function takeNotes(
   }
   const answers = await Promise.all(
     groups.map((g) =>
-      readGroup(client, wine, pages, g, usage).catch(async (e) => {
+      readGroup(client, wine, pages, g, usage, deadline).catch(async (e) => {
         // Too many notes for one answer: read those pages one at a time.
         if (g.length > 1 && /max_tokens/.test(String(e))) {
           const each = await Promise.all(
             g.map((i) =>
-              readGroup(client, wine, pages, [i], usage).catch((e2) => {
+              readGroup(client, wine, pages, [i], usage, deadline).catch((e2) => {
                 usage.read_errors.push(String(e2).slice(0, 120));
                 return [] as unknown[];
               }),
@@ -400,7 +405,10 @@ async function readGroup(
   pages: (ReadPage & { bytes?: Uint8Array })[],
   group: number[],
   usage: Usage,
+  deadline: number,
 ): Promise<unknown[]> {
+  const left = deadline - Date.now();
+  if (left < 10_000) throw new Error('out of time');
   const content: Anthropic.Beta.BetaContentBlockParam[] = [{ type: 'text', text: readText(wine) }];
   for (const i of group) {
     const p = pages[i];
@@ -418,13 +426,16 @@ async function readGroup(
     }
   }
   const message = await client.beta.messages
-    .stream({
-      model: READ_MODEL,
-      max_tokens: 24000,
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTES_SCHEMA } },
-      system: READ_SYSTEM,
-      messages: [{ role: 'user', content }],
-    })
+    .stream(
+      {
+        model: READ_MODEL,
+        max_tokens: 24000,
+        output_config: { effort: 'low', format: { type: 'json_schema', schema: NOTES_SCHEMA } },
+        system: READ_SYSTEM,
+        messages: [{ role: 'user', content }],
+      },
+      { signal: AbortSignal.timeout(left) },
+    )
     .finalMessage();
   usage.read_input += message.usage.input_tokens;
   usage.read_output += message.usage.output_tokens;
