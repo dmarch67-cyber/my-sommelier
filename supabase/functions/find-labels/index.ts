@@ -11,7 +11,10 @@
 //   4. Each vintage gets the picture showing its own year (close-ups first);
 //      the best picture of any year stands in for the wine's other vintages.
 //      Pictures are saved in the private "labels" Storage bucket.
-// The owner's own photos (label_source 'photo') are never replaced.
+// Pictures already there (the owner's own photos, or earlier finds) are never
+// replaced. After the first fill, an hourly schedule keeps calling it: each
+// call takes a wine never looked at (newly added), else a wine that has gained
+// a vintage without a picture since its last look, else answers {done:true}.
 //
 // Called by a database schedule or by hand through pg_net, like assess-wines:
 // the x-assess-secret header must match the 'assess_secret' Vault secret.
@@ -34,6 +37,8 @@ import {
   LOOK_SCHEMA,
   LOOK_SYSTEM,
   type Look,
+  newVintageWine,
+  type NewVintageRow,
   type Media,
   nameWords,
   type Page,
@@ -98,7 +103,12 @@ Deno.serve(async (req) => {
     p_max: Number.isInteger(body.max) ? body.max : null,
   });
   if (claimError) return reply(500, { error: claimError.message });
-  if (!wineId) return reply(200, { done: true });
+  // Nothing new to look at? Then a wine that already had its look may have
+  // a newly added vintage (new bottles, a delivery or an emailed invoice)
+  // still without a label picture.
+  const target = wineId ?? (body.max == null ? await claimNewVintage(db, accountId) : null);
+  if (!target) return reply(200, { done: true });
+  const wineIdFound = target as string;
 
   const usage: Usage = {
     search_input: 0,
@@ -116,11 +126,11 @@ Deno.serve(async (req) => {
     await db
       .from('wines')
       .update({ label_search_result: result, label_search_usage: { ...usage, ...extra } })
-      .eq('id', wineId);
+      .eq('id', wineIdFound);
   };
 
   try {
-    const wine = await loadWine(db, wineId as string);
+    const wine = await loadWine(db, wineIdFound);
     if (!wine) {
       await finish('failed', { error: 'wine not found' });
       return reply(404, { error: 'wine not found' });
@@ -200,7 +210,7 @@ Deno.serve(async (req) => {
         .from('vintages')
         .update(fields(n, path))
         .eq('id', vintageId)
-        .or('label_source.is.null,label_source.eq.web')
+        .is('label_path', null) // never replaces the owner's photo or an earlier find
         .select('id');
       vintagesDone[vintageId] = up?.length ? n : null;
     }
@@ -211,7 +221,7 @@ Deno.serve(async (req) => {
         .from('wines')
         .update(fields(standIn, path))
         .eq('id', wine.id)
-        .or('label_source.is.null,label_source.eq.web')
+        .is('label_path', null) // never replaces a picture the wine already has
         .select('id');
       wineDone = !!up?.length;
     }
@@ -246,7 +256,7 @@ async function loadWine(db: any, id: string): Promise<WineIn | null> {
     .from('wines')
     .select(
       'id,name,producer,country,region,appellation,colour,' +
-        'vintages(id,year,holdings(quantity,quantity_on_order))',
+        'vintages(id,year,label_path,holdings(quantity,quantity_on_order))',
     )
     .eq('id', id)
     .single();
@@ -254,6 +264,7 @@ async function loadWine(db: any, id: string): Promise<WineIn | null> {
   type V = {
     id: string;
     year: number | null;
+    label_path: string | null;
     holdings: { quantity: number; quantity_on_order: number }[];
   };
   return {
@@ -265,10 +276,46 @@ async function loadWine(db: any, id: string): Promise<WineIn | null> {
     appellation: w.appellation,
     colour: w.colour,
     vintages: ((w.vintages ?? []) as V[])
-      .filter((v) => (v.holdings ?? []).some((h) => h.quantity + h.quantity_on_order > 0))
+      // Only vintages still in the cellar (or on order) that have no picture yet.
+      .filter(
+        (v) =>
+          v.label_path == null &&
+          (v.holdings ?? []).some((h) => h.quantity + h.quantity_on_order > 0),
+      )
       .map((v) => ({ id: v.id, year: v.year }))
       .sort((a, b) => (a.year ?? 0) - (b.year ?? 0)),
   };
+}
+
+/**
+ * A wine that was looked at before but has gained a vintage since (added in
+ * the last 60 days, still held, no picture). Claims it by stamping
+ * label_searched_at, only if no other call stamped it first.
+ */
+// deno-lint-ignore no-explicit-any
+async function claimNewVintage(db: any, accountId: string): Promise<string | null> {
+  const since = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+  const { data } = await db
+    .from('vintages')
+    .select(
+      'created_at,label_path,wine:wines!inner(id,label_searched_at,label_search_result),' +
+        'holdings(quantity,quantity_on_order)',
+    )
+    .eq('account_id', accountId)
+    .is('label_path', null)
+    .gt('created_at', since)
+    .order('created_at')
+    .limit(500);
+  const id = newVintageWine((data ?? []) as NewVintageRow[], Date.now());
+  if (!id) return null;
+  const wine = ((data ?? []) as NewVintageRow[]).find((r) => r.wine.id === id)!.wine;
+  const { data: got } = await db
+    .from('wines')
+    .update({ label_searched_at: new Date().toISOString(), label_search_result: null })
+    .eq('id', id)
+    .eq('label_searched_at', wine.label_searched_at)
+    .select('id');
+  return got?.length ? id : null;
 }
 
 /** Step 1: Haiku searches and returns candidate pages, or undefined if it never answers. */
