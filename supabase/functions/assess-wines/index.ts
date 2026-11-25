@@ -183,7 +183,8 @@ async function loadWine(db: any, assessmentId: string): Promise<WineIn | null> {
         'vintages(id,year,drink_from,drink_to,drink_window_source,ct_drink_from,ct_drink_to,' +
         'holdings(quantity,quantity_on_order),' +
         'scores(source,source_detail,raw_value,drink_from,drink_to,reviewed_on),' +
-        'tasting_notes(tasted_on,maturity,rating,notes))',
+        'tasting_notes(tasted_on,maturity,rating,notes),' +
+        'critic_notes(author,kind,score,noted_on,note))',
     )
     .eq('id', a.wine_id)
     .single();
@@ -204,6 +205,7 @@ async function loadWine(db: any, assessmentId: string): Promise<WineIn | null> {
     ct_drink_to: v.ct_drink_to,
     scores: v.scores ?? [],
     own_notes: v.tasting_notes ?? [],
+    published: v.critic_notes ?? [],
   }));
   return {
     id: w.id,

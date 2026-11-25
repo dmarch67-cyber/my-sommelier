@@ -7,6 +7,7 @@ import { Stars } from '../../components/controls';
 import { Icon } from '../../components/Icon';
 import { LabelPicture } from '../../components/LabelPicture';
 import { RipenessBar } from '../../components/RipenessBar';
+import { CriticNotes } from '../../components/CriticNotes';
 import { FoodMatches } from '../../components/FoodMatches';
 import { MoveBottles, type MoveRequest } from '../../components/MoveBottles';
 import { Button, Card, Placeholder, Section, T } from '../../components/ui';
@@ -525,6 +526,7 @@ export default function WinePage() {
           ) : (
             <Placeholder text="No summary yet. One will appear after this wine's next review." />
           )}
+          <CriticNotes vintageId={id} />
         </Section>
 
         <Section title="Food matches">

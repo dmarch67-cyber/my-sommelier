@@ -14,6 +14,15 @@ export type VintageIn = {
   /** The drinking-window review's own summary (written to explain the window). */
   summary: string | null;
   scores: ScoreIn[];
+  /** Notes by critics and other tasters found on public web pages (gather-notes). */
+  notes?: NoteIn[];
+};
+export type NoteIn = {
+  author: string;
+  kind: string;
+  score: string | null;
+  noted_on: string | null;
+  note: string;
 };
 export type WineIn = {
   name: string;
@@ -42,10 +51,10 @@ export const SCHEMA = {
 
 export const SYSTEM = `You write the "What critics and drinkers say" section of a private wine-cellar app. The owner reads it on a wine's page to decide whether to open a bottle.
 
-For each vintage you get the notes of an earlier review, which summarised recent critic and community tasting notes in order to set a drinking window. Rewrite it for the owner:
+For each vintage you get the notes of an earlier review, which summarised recent critic and community tasting notes in order to set a drinking window, and often published tasting notes by critics, merchants and the winery, quoted word for word. Write the section for the owner from both:
 - Two or three short sentences, at most 60 words.
 - Say what the wine is like (fruit, structure, style) and how it is drinking now, and say who said so: "CellarTracker drinkers", "Jeb Dunnuck", "Vinous", "a 2025 note" and so on.
-- Use only what the review says. Never add a flavour, score, critic or opinion it does not give.
+- Use only what the review and the published notes say. Never add a flavour, score, critic or opinion they do not give. Lean on the critics' published notes for what the wine is like, and on the review for how it is drinking now. A winery's own note is not an independent opinion; use it only for style.
 - Never comment on how old or how many the notes are, and never say there are no recent notes or that newer notes may exist elsewhere (the page shows the date of the latest note). Just say what the notes and critics said.
 - Do not give drinking dates or say how long it will keep (the page already shows them); just say how it is drinking now, for example "ready to drink", "still needs time" or "drink soon".
 - Never use the word "window" and do not mention the review itself, "the digest", confidence, what the review had to rely on, or Vivino.
@@ -72,6 +81,11 @@ export function userText(w: WineIn): string {
     );
     if (v.scores.length) lines.push(`  scores: ${v.scores.map(scoreLine).join('; ')}`);
     lines.push(`  review: ${v.summary ?? '(none)'}`);
+    for (const n of (v.notes ?? []).slice(0, 8)) {
+      const head = [n.author, n.score, n.noted_on].filter(Boolean).join(', ');
+      const body = n.note.length > 500 ? n.note.slice(0, 500) + '\u2026' : n.note;
+      lines.push(`  published note (${n.kind}; ${head}): ${body}`);
+    }
   }
   return lines.join('\n');
 }
@@ -86,7 +100,7 @@ export function cleanAnswer(raw: unknown, w: WineIn): { vintage_id: string; text
     if (!r || typeof r.vintage_id !== 'string' || !asked.has(r.vintage_id)) continue;
     if (typeof r.text !== 'string') continue;
     const text = r.text
-      .replace(/\s*—\s*/g, ', ')
+      .replace(/\s*\u2014\s*/g, ', ')
       .replace(/\s+/g, ' ')
       .trim();
     // Drinking dates belong to the window above it, so a summary naming one is redone.
@@ -122,7 +136,7 @@ const COMMON = new Set([
 function words(s: string): string[] {
   return s
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((x) => x.length >= 3 && !COMMON.has(x));

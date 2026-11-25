@@ -39,6 +39,15 @@ export type VintageIn = {
   ct_drink_to?: number | null;
   scores: ScoreIn[];
   own_notes: OwnNoteIn[];
+  /** Critic, merchant and winery notes quoted on public pages (gather-notes). */
+  published?: PublishedNoteIn[];
+};
+export type PublishedNoteIn = {
+  author: string;
+  kind: string;
+  score: string | null;
+  noted_on: string | null;
+  note: string;
 };
 export type WineIn = {
   id: string;
@@ -130,7 +139,7 @@ export function systemPrompt(year: number): string {
 Weigh the evidence in this order:
 1. The owner's own tasting notes, when given.
 2. Recent tasting notes from the last two years, given below as a digest gathered from CellarTracker community notes, WineBerserkers, Reddit, merchants and critics. Several recent notes agreeing that a wine is tiring, drying out or past its peak should pull the end of the window in, even if a critic's older window runs later. Several saying it is still tight or closed should push the start out. Only vintages that are drinkable now or soon were searched. Notes from the last 12 months count fully, notes 12 to 24 months old count half, and older notes are background only and do not count as recent.
-3. Critic windows and scores (Vinous, Wine Advocate, Burghound, Jancis Robinson and others), and the CellarTracker window. Older critic windows are a starting point, not the answer.
+3. Critic windows, scores and published critic notes (Vinous, Wine Advocate, Burghound, Jancis Robinson and others), and the CellarTracker window. Older critic windows are a starting point, not the answer.
 4. Your own knowledge of the producer, appellation and vintage.
 
 Do not invent notes: where the digest has little or nothing, say so in the summary, rely on the other evidence and set confidence to low.
@@ -320,6 +329,11 @@ export function userText(w: WineIn): string {
     for (const n of v.own_notes) {
       const bits = [n.tasted_on, n.maturity, n.rating != null ? `${n.rating} pts` : null, n.notes];
       lines.push(`  owner's note: ${bits.filter(Boolean).join(' · ')}`);
+    }
+    for (const n of (v.published ?? []).filter((p) => p.kind !== 'winery').slice(0, 6)) {
+      const head = [n.author, n.score, n.noted_on ?? 'undated'].filter(Boolean).join(', ');
+      const body = n.note.length > 400 ? n.note.slice(0, 400) + '…' : n.note;
+      lines.push(`  published note (${head}): ${body}`);
     }
   }
   return lines.join('\n');
