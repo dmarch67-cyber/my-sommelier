@@ -63,11 +63,12 @@ $$);
 -- Cost of rechecks: select count(*), sum((usage->>'cost_usd')::numeric)
 --   from public.wine_assessments where usage->>'mode' = 'recheck';
 
--- 6. Recalibrate every window with the recheck (about 7 cents a vintage).
---    Every 2 minutes, fires 8 rechecks for held vintages (one per wine, most
---    bottles first) that have not been rechecked since the run began. Stops
---    finding work once all are done; then unschedule it.
--- select cron.schedule('recheck-all', '*/2 * * * *', $$
+-- 6. Recalibrate every window with the recheck (about 7 cents a vintage;
+--    run 2026-11-25 for ~800 vintages). Every 2 minutes, fires 8 rechecks for
+--    held vintages (one per wine, most bottles first) with no finished
+--    recheck yet; skips owner-set windows and gives up on a vintage after two
+--    failures. Unschedule once nothing is left.
+-- select cron.schedule('recheck-all', '*/2 * * * *', $cron$
 --   select net.http_post(
 --     url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/assess-wines',
 --     headers := jsonb_build_object('Content-Type', 'application/json', 'x-assess-secret',
@@ -75,24 +76,28 @@ $$);
 --     body := jsonb_build_object('vintage_id', t.id),
 --     timeout_milliseconds := 300000)
 --   from (
---     select distinct on (v.wine_id) v.id, v.wine_id
---     from public.vintages v
---     join public.holdings h on h.vintage_id = v.id
---     where (v.drink_window_source is null or v.drink_window_source <> 'owner')
---       and not exists (
---         select 1 from public.wine_assessments a
---         where a.wine_id = v.wine_id and a.usage ->> 'mode' = 'recheck'
---           and (a.usage ->> 'vintage_id')::uuid = v.id
---           and (a.ok or a.finished_at is null or a.started_at > now() - interval '15 minutes'))
---       and not exists (
---         select 1 from public.wine_assessments a
---         where a.wine_id = v.wine_id and a.finished_at is null
---           and a.started_at > now() - interval '5 minutes')
---     group by v.id, v.wine_id
---     having sum(h.quantity + h.quantity_on_order) > 0
---     order by v.wine_id, sum(h.quantity + h.quantity_on_order) desc
---     limit 8) t;
--- $$);
--- Progress: select count(*) filter (where ok), sum((usage->>'cost_usd')::numeric)
---   from public.wine_assessments where usage->>'mode' = 'recheck';
+--     select id from (
+--       select distinct on (v.wine_id) v.id, sum(h.quantity + h.quantity_on_order) as n
+--       from public.vintages v
+--       join public.holdings h on h.vintage_id = v.id
+--       where (v.drink_window_source is null or v.drink_window_source <> 'owner')
+--         and not exists (
+--           select 1 from public.wine_assessments a
+--           where a.usage ->> 'mode' = 'recheck' and a.usage ->> 'vintage_id' = v.id::text
+--             and (a.ok or (a.finished_at is null and a.started_at > now() - interval '15 minutes')
+--                  or (select count(*) from public.wine_assessments b
+--                      where b.usage ->> 'mode' = 'recheck' and b.usage ->> 'vintage_id' = v.id::text
+--                        and not b.ok) >= 2))
+--         and not exists (
+--           select 1 from public.wine_assessments a
+--           where a.wine_id = v.wine_id and a.finished_at is null
+--             and a.started_at > now() - interval '5 minutes')
+--       group by v.id, v.wine_id
+--       having sum(h.quantity + h.quantity_on_order) > 0
+--       order by v.wine_id, sum(h.quantity + h.quantity_on_order) desc
+--     ) x order by n desc limit 8
+--   ) t;
+-- $cron$);
+-- Progress: select count(*) filter (where ok), count(*) filter (where not ok and finished_at is not null),
+--   sum((usage->>'cost_usd')::numeric) from public.wine_assessments where usage->>'mode' = 'recheck';
 -- Pause:    select cron.unschedule('recheck-all');
