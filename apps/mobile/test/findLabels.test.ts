@@ -7,6 +7,7 @@ import {
   imageCandidates,
   isBlocked,
   nameWords,
+  newVintageWine,
   robotsAllows,
   sniff,
 } from '../../../supabase/functions/find-labels/prompt.ts';
@@ -113,4 +114,36 @@ test('recognises picture formats from their bytes', () => {
   assert.equal(sniff(new Uint8Array([0xff, 0xd8, 0xff])), 'image/jpeg');
   assert.equal(sniff(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), 'image/png');
   assert.equal(sniff(new TextEncoder().encode('<svg')), null);
+});
+
+test('looks again at a wine only for a vintage added after its last look', () => {
+  const now = Date.parse('2026-12-01T12:00:00Z');
+  const held = [{ quantity: 2, quantity_on_order: 0 }];
+  const row = (over: Record<string, unknown> = {}, wine: Record<string, unknown> = {}) => ({
+    created_at: '2026-12-01T10:00:00Z',
+    label_path: null,
+    holdings: held,
+    ...over,
+    wine: {
+      id: 'w1',
+      label_searched_at: '2026-11-25T03:00:00Z',
+      label_search_result: 'found',
+      ...wine,
+    },
+  });
+  assert.equal(newVintageWine([row()], now), 'w1');
+  // Already has a picture, no longer held, or added before the last look.
+  assert.equal(newVintageWine([row({ label_path: 'a/b.jpg' })], now), null);
+  assert.equal(
+    newVintageWine([row({ holdings: [{ quantity: 0, quantity_on_order: 0 }] })], now),
+    null,
+  );
+  assert.equal(newVintageWine([row({}, { label_searched_at: '2026-12-01T11:00:00Z' })], now), null);
+  // Never looked at: that's claim_label_search's job.
+  assert.equal(newVintageWine([row({}, { label_searched_at: null })], now), null);
+  // A look under way (stamped 5 minutes ago, no result yet) is left alone...
+  const busy = { label_searched_at: '2026-12-01T09:55:00Z', label_search_result: null };
+  assert.equal(newVintageWine([row({}, busy)], Date.parse('2026-12-01T10:00:00Z')), null);
+  // ...but one stuck for over 15 minutes is tried again.
+  assert.equal(newVintageWine([row({}, busy)], now), 'w1');
 });

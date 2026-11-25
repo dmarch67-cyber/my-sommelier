@@ -25,6 +25,20 @@ select cron.schedule('find-labels', '*/2 * * * *', $$
 $$);
 -- To stop: select cron.unschedule('find-labels');
 
+-- Keep it up to date (running since 2026-11-25): every hour, look for
+-- pictures for newly added wines and vintages. Calls with nothing to do
+-- return {"done":true} at once and cost nothing.
+select cron.schedule('find-labels-new', '17 * * * *', $$
+  select net.http_post(
+    url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/find-labels',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-assess-secret',
+      (select decrypted_secret from vault.decrypted_secrets where name = 'assess_secret')),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 150000)
+  from generate_series(1, 3);
+$$);
+-- To stop: select cron.unschedule('find-labels-new');
+
 -- Progress and cost (Haiku ~$1/M input, $5/M output; web search $10 per 1,000):
 select label_search_result, count(*),
        round(sum((label_search_usage->>'search_input')::numeric + (label_search_usage->>'look_input')::numeric) / 1e6

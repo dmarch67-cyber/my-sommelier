@@ -370,6 +370,34 @@ export function assign(
   return { byVintage, wine };
 }
 
+// ---------- new vintages ----------
+
+export type NewVintageRow = {
+  created_at: string;
+  label_path: string | null;
+  wine: { id: string; label_searched_at: string | null; label_search_result: string | null };
+  holdings: { quantity: number; quantity_on_order: number }[];
+};
+
+/**
+ * The wine to look at again because a vintage was added after its last look:
+ * the vintage is still held (or on order) and has no picture, the wine's last
+ * look has finished, and no look is under way (stamped in the last 15 minutes).
+ * Wines never looked at are left to claim_label_search.
+ */
+export function newVintageWine(rows: NewVintageRow[], now: number): string | null {
+  for (const r of rows) {
+    const w = r.wine;
+    if (r.label_path != null || !w?.label_searched_at) continue;
+    if (!(r.holdings ?? []).some((h) => h.quantity + h.quantity_on_order > 0)) continue;
+    const looked = Date.parse(w.label_searched_at);
+    if (Date.parse(r.created_at) <= looked) continue;
+    if (w.label_search_result == null && now - looked < 15 * 60 * 1000) continue;
+    return w.id;
+  }
+  return null;
+}
+
 // ---------- picture bytes ----------
 
 export type Media = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
