@@ -56,11 +56,14 @@ Deno.serve(async (req) => {
   });
   if (allowed !== true) return reply(401, { error: 'Not allowed.' });
 
-  const accountId = body.account_id ?? DEFAULT_ACCOUNT;
   let wineIds = Array.isArray(body.wine_ids) ? body.wine_ids.slice(0, 20) : null;
   if (!wineIds) {
     const limit = Number.isInteger(body.limit) ? Math.min(body.limit as number, 20) : 5;
-    wineIds = await winesDue(db, accountId, limit);
+    wineIds = [];
+    for (const accountId of await researchAccounts(db, body.account_id)) {
+      wineIds.push(...(await winesDue(db, accountId, limit - wineIds.length)));
+      if (wineIds.length >= limit) break;
+    }
   }
   if (wineIds.length === 0) return reply(200, { done: true });
 
@@ -164,4 +167,18 @@ async function rewriteWine(db: any, client: Anthropic, wineId: string) {
     input_tokens: message.usage.input_tokens,
     output_tokens: message.usage.output_tokens,
   };
+}
+
+/**
+ * Accounts to work on: the one asked for, or else every account whose
+ * research the admin has switched on (just the owner's on an older database).
+ */
+// deno-lint-ignore no-explicit-any
+async function researchAccounts(db: any, asked: unknown): Promise<string[]> {
+  if (typeof asked === 'string') return [asked];
+  const { data, error } = await db.rpc('research_accounts');
+  if (error || !Array.isArray(data)) return [DEFAULT_ACCOUNT];
+  return data.map((r: unknown) =>
+    typeof r === 'string' ? r : (r as { research_accounts: string }).research_accounts,
+  );
 }

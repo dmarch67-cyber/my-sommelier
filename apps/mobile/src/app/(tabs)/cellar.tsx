@@ -12,7 +12,6 @@ import { useCellarData } from '../../data/CellarData';
 import { downloadExport } from '../../data/exportFile';
 import { useLastCellar } from '../../data/lastCellar';
 import { askCellar, AskError, type Answer } from '../../data/ask';
-import { useAuth } from '../../lib/auth';
 import { MAX_CONTENT_WIDTH, colors, fonts, radius, space } from '../../lib/theme';
 import {
   ALL_CELLARS,
@@ -44,7 +43,6 @@ const SORTS: { key: SortKey; label: string }[] = [
 
 export default function CellarScreen() {
   const data = useCellarData();
-  const { signOut } = useAuth();
   const [filter, setFilter] = useLastCellar(data.cellars.map((c) => c.id));
   const [query, setQuery] = useState('');
   const [ask, setAsk] = useState<AskState | null>(null);
@@ -205,8 +203,12 @@ export default function CellarScreen() {
               Export to Excel
             </T>
           </Pressable>
-          <Pressable onPress={signOut} hitSlop={10} accessibilityRole="button">
-            <T variant="caption">Sign out</T>
+          <Pressable
+            onPress={() => router.push('/account')}
+            hitSlop={10}
+            accessibilityRole="button"
+          >
+            <T variant="caption">Account</T>
           </Pressable>
         </View>
       </View>

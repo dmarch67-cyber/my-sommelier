@@ -166,7 +166,7 @@ select pg_temp.check(
   (select critics_url is null from public.vintage_assessments where vintage_id = (select r05 from ids)),
   'only https links are kept');
 
--- Monthly refresh: nothing is due right after a review...
+-- Quarterly refresh: nothing is due right after a review...
 reset role;
 set local role service_role;
 create temp table rc1 as select public.claim_refresh_assessment((select acct from ids), 150) as a;
@@ -174,10 +174,10 @@ select pg_temp.check(
   (select wine_id from public.wine_assessments where id = (select a from rc1)) is distinct from (select ridge from ids),
   'a wine reviewed today is not refreshed');
 reset role;
--- ...but a month later, a moved CellarTracker score makes it due.
+-- ...but a quarter later, a moved CellarTracker score makes it due.
 update public.vintages set cellartracker_id = '111' where id = (select r19 from ids);
 update public.wine_assessments set ct_fingerprint = public.ct_fingerprint(wine_id),
-  finished_at = now() - interval '29 days', started_at = now() - interval '29 days'
+  finished_at = now() - interval '91 days', started_at = now() - interval '91 days'
 where id = (select a from claim1);
 delete from public.wine_assessments where id <> (select a from claim1);
 -- Every other wine was reviewed today.
@@ -197,9 +197,17 @@ set local role service_role;
 create temp table rc3 as select public.claim_refresh_assessment((select acct from ids), 150) as a;
 select pg_temp.check(
   (select wine_id from public.wine_assessments where id = (select a from rc3)) = (select ridge from ids),
-  'a moved CellarTracker score makes a month-old review due');
+  'a moved CellarTracker score makes a quarter-old review due');
 select pg_temp.check(public.claim_refresh_assessment((select acct from ids), 1) is null,
-  'the monthly cap stops further re-reviews');
+  'the quarterly cap stops further re-reviews');
+reset role;
+delete from public.wine_assessments where id = (select a from rc3);
+update public.wine_assessments set finished_at = now() - interval '29 days', started_at = now() - interval '29 days'
+where id = (select a from claim1);
+set local role service_role;
+create temp table rc3b as select public.claim_refresh_assessment((select acct from ids), 150) as a;
+select pg_temp.check((select a from rc3b) is null,
+  'a moved score does not make a month-old review due any more');
 reset role;
 select public.add_bottles((select id from public.cellars limit 1),
   '[{"wine_name": "New Arrival", "vintage": 2022, "quantity": 3}]'::jsonb);

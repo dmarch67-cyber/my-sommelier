@@ -88,7 +88,6 @@ Deno.serve(async (req) => {
   } catch {
     // no body
   }
-  const accountId = body.account_id ?? DEFAULT_ACCOUNT;
 
   const db = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -98,15 +97,24 @@ Deno.serve(async (req) => {
   });
   if (allowed !== true) return reply(401, { error: 'Not allowed.' });
 
-  const { data: wineId, error: claimError } = await db.rpc('claim_label_search', {
-    p_account_id: accountId,
-    p_max: Number.isInteger(body.max) ? body.max : null,
-  });
-  if (claimError) return reply(500, { error: claimError.message });
-  // Nothing new to look at? Then a wine that already had its look may have
-  // a newly added vintage (new bottles, a delivery or an emailed invoice)
-  // still without a label picture.
-  const target = wineId ?? (body.max == null ? await claimNewVintage(db, accountId) : null);
+  // The first account (with research on) that has a wine to look at.
+  let accountId = '';
+  let target: string | null = null;
+  for (const id of await researchAccounts(db, body.account_id)) {
+    const { data: wineId, error: claimError } = await db.rpc('claim_label_search', {
+      p_account_id: id,
+      p_max: Number.isInteger(body.max) ? body.max : null,
+    });
+    if (claimError) return reply(500, { error: claimError.message });
+    // Nothing new to look at? Then a wine that already had its look may have
+    // a newly added vintage (new bottles, a delivery or an emailed invoice)
+    // still without a label picture.
+    target = wineId ?? (body.max == null ? await claimNewVintage(db, id) : null);
+    if (target) {
+      accountId = id;
+      break;
+    }
+  }
   if (!target) return reply(200, { done: true });
   const wineIdFound = target as string;
 
@@ -472,4 +480,18 @@ async function lookAt(
   } catch {
     return null;
   }
+}
+
+/**
+ * Accounts to work on: the one asked for, or else every account whose
+ * research the admin has switched on (just the owner's on an older database).
+ */
+// deno-lint-ignore no-explicit-any
+async function researchAccounts(db: any, asked: unknown): Promise<string[]> {
+  if (typeof asked === 'string') return [asked];
+  const { data, error } = await db.rpc('research_accounts');
+  if (error || !Array.isArray(data)) return [DEFAULT_ACCOUNT];
+  return data.map((r: unknown) =>
+    typeof r === 'string' ? r : (r as { research_accounts: string }).research_accounts,
+  );
 }

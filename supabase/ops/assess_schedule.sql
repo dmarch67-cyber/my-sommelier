@@ -22,11 +22,12 @@ $$);
 -- Progress:   select count(*) filter (where ok), count(*) filter (where not ok and finished_at is not null)
 --             from public.wine_assessments;
 
--- 3. Monthly refresh (after the first full run is done). Every 10 minutes,
+-- 3. Quarterly refresh (after the first full run is done). Every 10 minutes,
 --    review at most one wine that is due: new, its CellarTracker community
---    score has moved and its review is 28+ days old, or its review is 90+ days
---    old. "cap" limits re-reviews to that many per 30 days (~5c each). When
---    nothing is due the call returns at once and costs nothing.
+--    score has moved and its review is 90+ days old, or its review is over a
+--    year old. "cap" limits re-reviews to that many per 90 days per account
+--    (~5c each). New wines are always reviewed. When nothing is due the call
+--    returns at once and costs nothing.
 select cron.schedule('refresh-wines', '*/10 * * * *', $$
   select net.http_post(
     url := 'https://fhvwihqcctgekuejxzzv.supabase.co/functions/v1/assess-wines',

@@ -86,9 +86,10 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!apiKey || !supabaseUrl || !serviceKey) return reply(503, { error: 'Not set up.' });
 
-  // mode 'refresh' (the monthly schedule): wines that are new, whose
-  // CellarTracker community score has moved, or whose review is over 90 days
-  // old, capped at 'cap' reviews per 30 days. Otherwise the first full run.
+  // mode 'refresh' (the quarterly refresh): wines that are new, whose
+  // CellarTracker community score has moved since a review 90+ days old, or
+  // whose review is over a year old, capped at 'cap' re-reviews per 90 days.
+  // Otherwise the first full run.
   let body: {
     account_id?: string;
     max?: number;
@@ -104,7 +105,6 @@ Deno.serve(async (req) => {
   if (typeof body.vintage_id === 'string') {
     return await recheck(req, body.vintage_id, apiKey, supabaseUrl, serviceKey);
   }
-  const accountId = body.account_id ?? DEFAULT_ACCOUNT;
   const max = Number.isInteger(body.max) ? (body.max as number) : 50;
 
   const db = createClient(supabaseUrl, serviceKey, {
@@ -115,14 +115,23 @@ Deno.serve(async (req) => {
   });
   if (allowed !== true) return reply(401, { error: 'Not allowed.' });
 
-  const { data: assessmentId, error: claimError } =
-    body.mode === 'refresh'
-      ? await db.rpc('claim_refresh_assessment', {
-          p_account_id: accountId,
-          p_month_cap: Number.isInteger(body.cap) ? (body.cap as number) : 150,
-        })
-      : await db.rpc('claim_next_assessment', { p_account_id: accountId, p_max: max });
-  if (claimError) return reply(500, { error: claimError.message });
+  // The first account (with research on) that has a wine due gets this run.
+  // The quarterly cap applies to each account separately.
+  let assessmentId: string | null = null;
+  for (const accountId of await researchAccounts(db, body.account_id)) {
+    const { data, error: claimError } =
+      body.mode === 'refresh'
+        ? await db.rpc('claim_refresh_assessment', {
+            p_account_id: accountId,
+            p_month_cap: Number.isInteger(body.cap) ? (body.cap as number) : 150,
+          })
+        : await db.rpc('claim_next_assessment', { p_account_id: accountId, p_max: max });
+    if (claimError) return reply(500, { error: claimError.message });
+    if (data) {
+      assessmentId = data as string;
+      break;
+    }
+  }
   if (!assessmentId) return reply(200, { done: true });
 
   const usage: Usage = {
@@ -542,4 +551,18 @@ async function readFindings(
     return undefined;
   }
   return undefined;
+}
+
+/**
+ * Accounts to work on: the one asked for, or else every account whose
+ * research the admin has switched on (just the owner's on an older database).
+ */
+// deno-lint-ignore no-explicit-any
+async function researchAccounts(db: any, asked: unknown): Promise<string[]> {
+  if (typeof asked === 'string') return [asked];
+  const { data, error } = await db.rpc('research_accounts');
+  if (error || !Array.isArray(data)) return [DEFAULT_ACCOUNT];
+  return data.map((r: unknown) =>
+    typeof r === 'string' ? r : (r as { research_accounts: string }).research_accounts,
+  );
 }
