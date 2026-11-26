@@ -220,6 +220,34 @@ export function search(items: CellarItem[], query: string): CellarItem[] {
   });
 }
 
+/** Old World countries, where the Region level (Bordeaux, Burgundy, Tuscany) is the familiar one. */
+const REGION_LEVEL_COUNTRIES = new Set([
+  'France',
+  'Italy',
+  'Spain',
+  'Portugal',
+  'Germany',
+  'Austria',
+  'Greece',
+  'Hungary',
+  'Switzerland',
+]);
+
+/**
+ * The wine region used to group the Cellar list's Region sort: Bordeaux,
+ * Burgundy, Napa Valley, Paso Robles, Willamette Valley. In Europe that is the
+ * Region level; elsewhere the Region level is a state (California, Oregon), so
+ * the Sub-region is used instead. Paso Robles sits inside the much larger
+ * Central Coast, so it gets a group of its own.
+ */
+export function sortRegion(
+  i: Pick<CellarItem, 'country' | 'region' | 'subRegion' | 'appellation'>,
+): string | null {
+  if (i.country && REGION_LEVEL_COUNTRIES.has(i.country)) return i.region ?? i.subRegion;
+  if (i.appellation && /^paso robles/i.test(i.appellation)) return 'Paso Robles';
+  return i.subRegion ?? i.region;
+}
+
 const byName = (a: CellarItem, b: CellarItem) =>
   a.wineName.localeCompare(b.wineName) || (a.vintage ?? 0) - (b.vintage ?? 0);
 
@@ -228,9 +256,14 @@ export function sortItems(items: CellarItem[], key: SortKey, year: number): Cell
   if (key === 'score') {
     out.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || byName(a, b));
   } else if (key === 'region') {
-    const place = (i: CellarItem) =>
-      [i.country ?? '~', i.region ?? '~', i.subRegion ?? '~', i.appellation ?? '~'].join('|');
-    out.sort((a, b) => place(a).localeCompare(place(b)) || byName(a, b));
+    const winery = (i: CellarItem) => i.producer ?? i.wineName;
+    out.sort(
+      (a, b) =>
+        (a.country ?? '~').localeCompare(b.country ?? '~') ||
+        (sortRegion(a) ?? '~').localeCompare(sortRegion(b) ?? '~') ||
+        winery(a).localeCompare(winery(b)) ||
+        byName(a, b),
+    );
   } else {
     out.sort((a, b) => readyRank(a, year) - readyRank(b, year) || byName(a, b));
   }
