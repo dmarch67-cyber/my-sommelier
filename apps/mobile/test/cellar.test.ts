@@ -12,6 +12,7 @@ import {
   scoreValue,
   search,
   sortItems,
+  sortRegion,
   totals,
   type InventoryRow,
   type Score,
@@ -174,6 +175,88 @@ test('region sort groups by country, region, appellation', () => {
     sortItems(items, 'region', 2026).map((i) => i.wineName),
     ['Château Latour', 'Ridge Monte Bello', 'Truss'],
   );
+});
+
+test('region sort groups by wine region, then winery', () => {
+  const items = groupInventory(
+    [
+      row({
+        vintage_id: 'a',
+        wine_name: 'Zeta Pinot',
+        producer: 'Zeta',
+        region: 'Oregon',
+        sub_region: 'Willamette Valley',
+        appellation: 'Dundee Hills',
+      }),
+      row({
+        vintage_id: 'b',
+        wine_name: 'Alpha Pinot',
+        producer: 'Alpha',
+        region: 'Oregon',
+        sub_region: 'Willamette Valley',
+        appellation: 'Eola - Amity Hills',
+      }),
+      row({
+        vintage_id: 'c',
+        wine_name: 'Saxum',
+        producer: 'Saxum',
+        region: 'California',
+        sub_region: 'Central Coast',
+        appellation: 'Paso Robles Willow Creek District',
+      }),
+      row({
+        vintage_id: 'd',
+        wine_name: 'Latour',
+        producer: 'Château Latour',
+        country: 'France',
+        region: 'Bordeaux',
+        sub_region: 'Médoc',
+        appellation: 'Pauillac',
+      }),
+      row({
+        vintage_id: 'e',
+        wine_name: 'Cheval Blanc',
+        producer: 'Cheval Blanc',
+        country: 'France',
+        region: 'Bordeaux',
+        sub_region: 'Libournais',
+        appellation: 'Saint-Émilion',
+      }),
+      row({
+        vintage_id: 'f',
+        wine_name: 'Rousseau',
+        producer: 'Armand Rousseau',
+        country: 'France',
+        region: 'Burgundy',
+        sub_region: 'Côte de Nuits',
+        appellation: 'Gevrey-Chambertin',
+      }),
+    ],
+    ALL_CELLARS,
+    new Map(),
+  );
+  assert.deepEqual(
+    sortItems(items, 'region', 2026).map((i) => i.wineName),
+    ['Latour', 'Cheval Blanc', 'Rousseau', 'Saxum', 'Alpha Pinot', 'Zeta Pinot'],
+  );
+});
+
+test('sortRegion picks the familiar region level', () => {
+  const p = (
+    country: string,
+    region: string | null,
+    subRegion: string | null,
+    appellation: string | null,
+  ) => sortRegion({ country, region, subRegion, appellation });
+  assert.equal(p('France', 'Bordeaux', 'Médoc', 'Pauillac'), 'Bordeaux');
+  assert.equal(p('Italy', 'Tuscany', 'Montalcino', 'Brunello di Montalcino'), 'Tuscany');
+  assert.equal(p('USA', 'California', 'Napa Valley', 'Oakville'), 'Napa Valley');
+  assert.equal(
+    p('USA', 'California', 'Central Coast', 'Paso Robles Adelaida District'),
+    'Paso Robles',
+  );
+  assert.equal(p('USA', 'California', 'Central Coast', 'Sta. Rita Hills'), 'Central Coast');
+  assert.equal(p('USA', 'Willamette Valley', null, null), 'Willamette Valley');
 });
 
 test('ripeness states and bar positions', () => {
