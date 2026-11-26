@@ -86,9 +86,10 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!apiKey || !supabaseUrl || !serviceKey) return reply(503, { error: 'Not set up.' });
 
-  // mode 'refresh' (the monthly schedule): wines that are new, whose
-  // CellarTracker community score has moved, or whose review is over 90 days
-  // old, capped at 'cap' reviews per 30 days. Otherwise the first full run.
+  // mode 'refresh' (the quarterly refresh): wines that are new, whose
+  // CellarTracker community score has moved since a review 90+ days old, or
+  // whose review is over a year old, capped at 'cap' re-reviews per 90 days.
+  // Otherwise the first full run.
   let body: {
     account_id?: string;
     max?: number;
@@ -115,7 +116,7 @@ Deno.serve(async (req) => {
   if (allowed !== true) return reply(401, { error: 'Not allowed.' });
 
   // The first account (with research on) that has a wine due gets this run.
-  // The monthly cap applies to each account separately.
+  // The quarterly cap applies to each account separately.
   let assessmentId: string | null = null;
   for (const accountId of await researchAccounts(db, body.account_id)) {
     const { data, error: claimError } =
