@@ -46,8 +46,10 @@ type CellarData = {
   palateSettings: PalateSettings | null;
   /** The owner's palate, worked out from all of the above. */
   palate: PalateProfile;
-  /** The signed-in user's account (for saving settings). */
+  /** The signed-in user's account (for saving settings and new cellars). */
   accountId: string | null;
+  /** That account's row (null until loaded). */
+  account: { id: string; name: string } | null;
   /** Changes the quiz answers or "not really" lines: shown at once, saved in the background. */
   updatePalate: (settings: PalateSettings) => Promise<void>;
   /** Fetches everything again. Screens keep showing the old data meanwhile. */
@@ -182,8 +184,8 @@ async function loadReviews(): Promise<Pick<Loaded, 'maturity' | 'critics'>> {
 }
 
 async function loadAll(): Promise<Loaded> {
-  const [cellars, inventory, scores, accolades, notes, reviews, palate, labels] = await Promise.all(
-    [
+  const [cellars, inventory, scores, accolades, notes, reviews, palate, labels, accounts] =
+    await Promise.all([
       fetchAll<Cellar>('cellars', 'id,name,location,currency,sort_order', 'sort_order'),
       fetchAll<InventoryRow>('cellar_inventory', INVENTORY_COLUMNS, 'holding_id'),
       fetchAll<Score>('scores', SCORE_COLUMNS, 'id'),
@@ -192,8 +194,8 @@ async function loadAll(): Promise<Loaded> {
       loadReviews(),
       loadPalate(),
       loadLabels(),
-    ],
-  );
+      fetchAll<{ id: string; name: string }>('accounts', 'id,name', 'created_at'),
+    ]);
   return {
     status: 'ready',
     error: null,
@@ -205,6 +207,7 @@ async function loadAll(): Promise<Loaded> {
     ...reviews,
     ...palate,
     labels,
+    account: accounts[0] ?? null,
   };
 }
 
@@ -222,6 +225,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
     labels: NO_LABELS,
     drinking: [],
     palateSettings: null,
+    account: null,
   });
 
   const reload = useCallback(async () => {
@@ -263,7 +267,7 @@ export function CellarDataProvider({ children }: { children: ReactNode }) {
       }),
     [state.inventory, state.drinking, state.notes, state.palateSettings],
   );
-  const accountId = state.inventory[0]?.account_id ?? null;
+  const accountId = state.account?.id ?? state.inventory[0]?.account_id ?? null;
   const updatePalate = useCallback(
     async (settings: PalateSettings) => {
       if (!accountId) throw new Error('Your cellar has not loaded yet.');

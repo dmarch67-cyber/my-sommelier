@@ -90,7 +90,6 @@ Deno.serve(async (req) => {
   } catch {
     // no body
   }
-  const accountId = body.account_id ?? DEFAULT_ACCOUNT;
 
   const db = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -108,12 +107,16 @@ Deno.serve(async (req) => {
       .update({ notes_searched_at: new Date().toISOString(), notes_search_result: null })
       .eq('id', wineId);
   } else {
-    const { data, error } = await db.rpc('claim_notes_search', {
-      p_account_id: accountId,
-      p_max: Number.isInteger(body.max) ? body.max : null,
-    });
-    if (error) return reply(500, { error: error.message });
-    wineId = data as string | null;
+    // The first account (with research on) that has a wine to look at.
+    for (const accountId of await researchAccounts(db, body.account_id)) {
+      const { data, error } = await db.rpc('claim_notes_search', {
+        p_account_id: accountId,
+        p_max: Number.isInteger(body.max) ? body.max : null,
+      });
+      if (error) return reply(500, { error: error.message });
+      wineId = data as string | null;
+      if (wineId) break;
+    }
   }
   if (!wineId) return reply(200, { done: true });
 
@@ -445,4 +448,18 @@ async function readGroup(
   }
   const notes = (JSON.parse(text.text) as { notes?: unknown }).notes;
   return Array.isArray(notes) ? notes : [];
+}
+
+/**
+ * Accounts to work on: the one asked for, or else every account whose
+ * research the admin has switched on (just the owner's on an older database).
+ */
+// deno-lint-ignore no-explicit-any
+async function researchAccounts(db: any, asked: unknown): Promise<string[]> {
+  if (typeof asked === 'string') return [asked];
+  const { data, error } = await db.rpc('research_accounts');
+  if (error || !Array.isArray(data)) return [DEFAULT_ACCOUNT];
+  return data.map((r: unknown) =>
+    typeof r === 'string' ? r : (r as { research_accounts: string }).research_accounts,
+  );
 }
