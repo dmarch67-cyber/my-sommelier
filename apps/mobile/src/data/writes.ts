@@ -142,9 +142,40 @@ export async function saveNote(
   return data!.id as string;
 }
 
-export async function deleteNote(id: string): Promise<void> {
-  const { error } = await supabase.from('tasting_notes').delete().eq('id', id);
+/**
+ * Saves changes to a note you wrote earlier (Notes page, Edit). Only the fields
+ * given are changed, so an untouched score (e.g. 94 from CellarTracker) is kept
+ * exactly. An edited CellarTracker note becomes your own, so the daily
+ * CellarTracker sync never overwrites the edit.
+ */
+export async function updateNote(
+  id: string,
+  patch: Partial<{
+    rating: number | null;
+    liked: boolean | null;
+    notes: string | null;
+    maturity: Maturity | null;
+    food_pairing: string | null;
+    occasion: string | null;
+    would_buy_again: boolean | null;
+  }>,
+  wasFromCellarTracker: boolean,
+): Promise<void> {
+  const row = { ...patch, ...(wasFromCellarTracker ? { source: 'app' } : {}) };
+  const { data, error } = await supabase
+    .from('tasting_notes')
+    .update(row)
+    .eq('id', id)
+    .select('id');
   fail(error);
+  if (!data?.length) throw new Error('This note could not be changed. It may have been deleted.');
+}
+
+/** Deletes one of your notes. A deleted CellarTracker note is not brought back by the sync. */
+export async function deleteNote(id: string): Promise<void> {
+  const { data, error } = await supabase.from('tasting_notes').delete().eq('id', id).select('id');
+  fail(error);
+  if (!data?.length) throw new Error('This note could not be deleted. It may already be gone.');
 }
 
 /** Saves the taste quiz answers and the profile lines marked "not really". */

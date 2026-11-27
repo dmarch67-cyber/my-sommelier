@@ -10,7 +10,7 @@ import { useCellarData } from '../../data/CellarData';
 import { formatDay } from '../../lib/format';
 import { MAX_CONTENT_WIDTH, colors, radius, space } from '../../lib/theme';
 
-/** Your own tasting notes, newest first. */
+/** Your own tasting notes, newest first. Tap a note for the wine, or Edit to change or delete it. */
 export default function NotesScreen() {
   const data = useCellarData();
 
@@ -87,6 +87,17 @@ export default function NotesScreen() {
                   .filter(Boolean)
                   .join(' · ')}
               </T>
+              <Pressable
+                onPress={() => router.push({ pathname: '/note-edit', params: { id: item.id } })}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit or delete note on ${item.wine}`}
+                hitSlop={8}
+                style={({ pressed }) => [styles.edit, pressed && { opacity: 0.7 }]}
+              >
+                <T variant="caption" style={{ color: colors.accent, fontWeight: '600' }}>
+                  Edit
+                </T>
+              </Pressable>
             </View>
             {item.rating ? <Stars value={Math.round(item.rating / 20)} size={16} /> : null}
             {item.notes ? <T variant="body">{item.notes}</T> : null}
@@ -108,6 +119,13 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   head: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
+  edit: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   palate: {
     flexDirection: 'row',
     alignItems: 'center',
